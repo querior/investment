@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+
+# DB / migrations
+alembic/versions/*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Docker
+docker-data/

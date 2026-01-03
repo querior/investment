@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://dbadmin:dbadmin@db:5432/investmentdb
+      - FRED_API_KEY=${FRED_API_KEY}
+    depends_on:
+      - db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  db:
+    image: postgres:15
+    container_name: investment-db
+    environment:
+      POSTGRES_USER: dbadmin
+      POSTGRES_PASSWORD: dbadmin
+      POSTGRES_DB: investmentdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
