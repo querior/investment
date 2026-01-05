@@ -20,7 +20,7 @@ def process_indicator(indicator: str):
       return
 
     df = pd.DataFrame(
-      [{"date": r.date,"value": r.value}for r in rows]
+      [{"date": r.date,"value": r.value} for r in rows]
     ).set_index("date")
 
     z = compute_z_score(df["value"], WINDOW)
