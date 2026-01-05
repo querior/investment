@@ -6,24 +6,29 @@ services:
     volumes:
       - ./app:/app/app
       - ./tests:/app/tests
+
+    env_file:
+      - .env.${ENVIRONMENT:-dev}
+
     environment:
-      - DATABASE_URL=postgresql+psycopg2://dbadmin:dbadmin@db:5432/investmentdb
-      - FRED_API_KEY=${FRED_API_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
+
     depends_on:
       - db
+
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   db:
     image: postgres:15
     container_name: investment-db
-    environment:
-      POSTGRES_USER: dbadmin
-      POSTGRES_PASSWORD: dbadmin
-      POSTGRES_DB: investmentdb
+    env_file:
+      - .env.${ENVIRONMENT:-dev}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_${ENVIRONMENT:-dev}:/var/lib/postgresql/data
 
 volumes:
-  postgres_data:
+  postgres_data_dev:
+  postgres_data_test:
+  postgres_data_prod:

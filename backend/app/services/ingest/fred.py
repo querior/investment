@@ -1,6 +1,6 @@
 from fredapi import Fred
 from app.db.session import SessionLocal
-from app.db.models import MacroRaw
+from app.db.macro_raw import MacroRaw
 from datetime import date
 
 def ingest_fred_series(series_id: str, fred: Fred):
