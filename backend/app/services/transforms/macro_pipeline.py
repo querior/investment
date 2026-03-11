@@ -4,9 +4,9 @@ from app.db.macro_raw import MacroRaw
 from app.db.macro_processed import MacroProcessed
 from app.services.transforms.normalization import compute_z_score, clip
 
-WINDOW =60 # 5 anni mensili
+WINDOW = 60 # 5 anni mensili
 
-def process_indicator(indicator: str):
+def process_indicator(indicator: str, window: int = WINDOW):
   db = SessionLocal()
   try:
     rows = (
@@ -23,7 +23,7 @@ def process_indicator(indicator: str):
       [{"date": r.date,"value": r.value} for r in rows]
     ).set_index("date")
 
-    z = compute_z_score(df["value"], WINDOW)
+    z = compute_z_score(df["value"], window)
     z = clip(z)
 
     for date, row in df.iterrows():
@@ -31,12 +31,13 @@ def process_indicator(indicator: str):
         continue
 
       rec = MacroProcessed(
-          date=date,
-          indicator=indicator,
-          value=row["value"],
-          z_score=float(z.loc[date]),
-          source="FRED",
+        date=date,
+        indicator=indicator,
+        value=float(row["value"]),        
+        z_score=float(z.loc[date]), 
+        source="FRED",
       )
+
       db.merge(rec)
 
     db.commit()

@@ -1,11 +1,19 @@
-from fastapi import APIRouter
-from app.services.transforms.macro_pipeline import process_indicator
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from app.db.session import SessionLocal
+from app.services.processed.orchestrator import process_all_indicators
 
-router = APIRouter(tags=["process"])
+router = APIRouter(tags=["processed"])
 
-@router.post("/process/macro")
-def process_macro():
-  for indicator in ["NAPM","GDPC1","INDPRO"]:
-    process_indicator(indicator)
+def get_db():
+  db = SessionLocal()
+  try:
+    yield db
+  finally:
+    db.close()
+    
 
-  return {"status":"processed"}
+@router.post("/processed")
+def build_processed(db: Session = Depends(get_db)):
+	process_all_indicators(db)
+	return {"status":"ok"}

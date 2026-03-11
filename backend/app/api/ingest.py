@@ -1,12 +1,8 @@
 from fastapi import APIRouter
-from fredapi import Fred
-from app.services.ingest.fred import ingest_fred_series
+from app.services.ingest.bootstrap_macro import ingest_all_macro
 
 router = APIRouter(tags=["ingest"])
 
 @router.post("/ingest/macro")
-def ingest_macro():
-    fred = Fred()
-    for ticker in ["NAPM", "GDPC1", "INDPRO"]:
-        ingest_fred_series(ticker, fred)
-    return {"status": "ok"}
+def ingest_macro_all():
+    ingest_all_macro()

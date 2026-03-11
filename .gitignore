@@ -21,3 +21,6 @@ alembic/versions/*.pyc
 
 # Docker
 docker-data/
+
+# Frontend
+frontend/node_modules
