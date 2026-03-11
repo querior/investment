@@ -10,6 +10,9 @@ import {
 	GlobalOutlined,
 	DatabaseOutlined,
 	PlayCircleOutlined,
+	LineChartOutlined,
+	RiseOutlined,
+	DollarOutlined,
 } from "@ant-design/icons";
 import { useNavigate, Outlet } from "react-router-dom";
 import { useDispatch } from "react-redux";
@@ -33,17 +36,21 @@ function AppLayout() {
 				children: [
 					{ key: "/analysis/data", icon: <DatabaseOutlined />, label: "Data" },
 					{
-						key: "/analysis/scenarios",
-						icon: <GlobalOutlined />,
-						label: "Scenarios",
+						key: "/analysis/backtest",
+						icon: <PlayCircleOutlined />,
+						label: "Backtest",
 					},
 				],
 			},
 			{
-				key: "/playbook",
-				icon: <PlayCircleOutlined />,
-				label: "Playbook",
-				children: [],
+				key: "/live",
+				icon: <LineChartOutlined />,
+				label: "Live",
+				children: [
+					{ key: "/live/long", icon: <GlobalOutlined />, label: "Long" },
+					{ key: "/live/medium", icon: <DollarOutlined />, label: "Medium" },
+					{ key: "/live/short", icon: <RiseOutlined />, label: "Short" },
+				],
 			},
 			{ key: "/settings", icon: <SettingOutlined />, label: "Settings" },
 		],
@@ -88,7 +95,6 @@ function AppLayout() {
 			<Layout>
 				<Header className="bg-white shadow flex items-center justify-between px-4">
 					<div className="flex items-center gap-3">
-						{/* Always present toggle (works also on desktop) */}
 						<button
 							className="text-xl p-2 rounded hover:bg-gray-100"
 							onClick={() => setCollapsed((v) => !v)}
