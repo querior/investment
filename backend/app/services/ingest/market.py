@@ -23,30 +23,31 @@ def _set_last_date(db: Session, key: str, d: date):
   if row:
     row.last_date = d # type: ignore
   else:
-    db.add(IngestionState(key=key, date=d))
+    db.add(IngestionState(key=key, last_date=d))
     
 def ingest_market_delta(db: Session, symbol: str, source: str = "YAHOO") -> int:
   key = f"MK:{symbol}"
-  last_date = _get_last_date(db, symbol)
-  
-  data = yf.download(symbol, start=last_date, progress=False)
+  last_date = _get_last_date(db, key)
+
+  ticker = yf.Ticker(symbol)
+  data = ticker.history(start=last_date, auto_adjust=True)
   if data.empty:
     return 0
-  
+
   count = 0
   for idx, row in data.iterrows():
     d = idx.date()
     if last_date and d <= last_date:
-        continue
+      continue
 
     db.merge(
       MarketPrice(
         symbol=symbol,
         date=d,
         open=float(row["Open"]),
-        highh=float(row["High"]),
+        high=float(row["High"]),
         low=float(row["Low"]),
-        close=float(row["Adj Close"]),
+        close=float(row["Close"]),
         volume=float(row["Volume"]),
         source=source,
       )

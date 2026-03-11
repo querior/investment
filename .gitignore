@@ -5,6 +5,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.development
+!.env.test
+!.env.production
 
 # DB / migrations
 alembic/versions/*.pyc

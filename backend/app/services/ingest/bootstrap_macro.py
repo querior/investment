@@ -13,7 +13,11 @@ INDICATORS = [
 ]
 
 def ingest_all_macro():
-  logger.info("*** ingest raw date from FRED")
+  logger.info("*** ingest raw data from FRED")
   fred = Fred(api_key=os.getenv("FRED_API_KEY"))
   for ticker in INDICATORS:
-    ingest_fred_series(ticker, fred)
+    try:
+      ingest_fred_series(ticker, fred)
+      logger.info("FRED OK: %s", ticker)
+    except Exception as e:
+      logger.error("FRED ERR %s: %s", ticker, e)

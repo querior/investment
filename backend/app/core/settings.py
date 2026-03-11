@@ -3,7 +3,7 @@ from pydantic import Field
 import os
 import json
 
-ENV = os.getenv("ENVIRONMENT", "dev")
+ENV = os.getenv("ENVIRONMENT", "development")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

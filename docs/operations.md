@@ -4,9 +4,9 @@
 
 | Ambiente | Variabile | File di configurazione | Uso |
 |----------|-----------|------------------------|-----|
-| Development | `development` | `backend/.env.dev` | Sviluppo locale, default |
+| Development | `development` | `backend/.env.development` | Sviluppo locale, default |
 | Test | `test` | `backend/.env.test` | Esecuzione test, CI |
-| Production | `production` | `backend/.env.prod` | Deploy live |
+| Production | `production` | `backend/.env.production` | Deploy live |
 
 ---
 
@@ -67,10 +67,10 @@ Ogni ambiente ha il proprio file di configurazione in `backend/`:
 
 ```
 backend/
-├── .env.dev     # development
-├── .env.test    # test
-├── .env.prod    # production
-└── .env.example # template di riferimento
+├── .env.development  # development
+├── .env.test         # test
+├── .env.production   # production
+└── .env.example      # template di riferimento
 ```
 
 I valori da personalizzare obbligatoriamente:

@@ -8,10 +8,10 @@ services:
       - ./tests:/app/tests
 
     env_file:
-      - .env.${ENVIRONMENT:-dev}
+      - .env.${ENVIRONMENT:-development}
 
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-dev}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
 
     depends_on:
       - db
@@ -22,13 +22,13 @@ services:
     image: postgres:15
     container_name: investment-db
     env_file:
-      - .env.${ENVIRONMENT:-dev}
+      - .env.${ENVIRONMENT:-development}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data_${ENVIRONMENT:-dev}:/var/lib/postgresql/data
+      - postgres_data_${ENVIRONMENT:-development}:/var/lib/postgresql/data
 
 volumes:
-  postgres_data_dev:
+  postgres_data_development:
   postgres_data_test:
-  postgres_data_prod:
+  postgres_data_production:
