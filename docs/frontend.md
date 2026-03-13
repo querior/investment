@@ -13,6 +13,7 @@
 | UI component library | Ant Design 5 | — |
 | CSS utility | Tailwind CSS 3 | — |
 | HTTP client | Axios | Interceptor per auth token |
+| Grafici | Visx 3.12 (by Airbnb) | Wrapper React su D3, unica libreria per line/bar/candlestick, tree-shakeable, MIT |
 
 ---
 
@@ -125,7 +126,7 @@ Vedi [`docs/operations.md`](./operations.md) per avviare il backend.
 
 - [ ] Come esporre i dati del Layer Long (polling? websocket? server-sent events?)
 - [ ] Internazionalizzazione (IT/EN)?
-- [ ] Grafici: libreria da scegliere (Recharts? Chart.js? Victory?)
+- [x] Grafici: Visx (vedi `docs/decisions/003-charts-visx.md`)
 - [ ] Mobile: condividere logica con React Native Expo o tenere separato?
 
 ---

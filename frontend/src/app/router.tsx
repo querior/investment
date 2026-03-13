@@ -5,6 +5,7 @@ import Dashboard from "../pages/Dashboard";
 import Settings from "../pages/Settings";
 import Backtest from "../pages/Backtest";
 import Data from "../pages/Data";
+import DataDetail from "../pages/DataDetail";
 import LiveLong from "../pages/LiveLong";
 import LiveMedium from "../pages/LiveMedium";
 import LiveShort from "../pages/LiveShort";
@@ -39,6 +40,10 @@ const router = createBrowserRouter([
 			{
 				path: "analysis/data",
 				element: <Data />,
+			},
+			{
+				path: "analysis/data/:id",
+				element: <DataDetail />,
 			},
 			{
 				path: "live/long",

@@ -1,12 +1,15 @@
 import { call, put, takeLatest } from "redux-saga/effects";
-import { getCatalogApi } from "../../services/data-service";
+import { getCatalogApi, getSeriesForSymbolApi } from "../../services/data-service";
 import {
 	fetchCatalogSuccess,
 	fetchCatalogFailure,
 	fetchCatalogRequest,
+	getSeriesForSymbolRequest,
+	getSeriesForSymbolSuccess,
+	getSeriesForSymbolFailed,
 } from "./reducer";
 
-function* fetchCatalogWorker(
+function* fetchCatalogEffect(
 	action: ReturnType<typeof fetchCatalogRequest>
 ): any {
 	try {
@@ -33,6 +36,19 @@ function* fetchCatalogWorker(
 	}
 }
 
+function* getSeriesForSymbolEffect(
+	action: ReturnType<typeof getSeriesForSymbolRequest>
+): any {
+	try {
+		const series = yield call(getSeriesForSymbolApi, action.payload);
+		yield put(getSeriesForSymbolSuccess(series));
+	} catch (e: any) {
+		const msg = e?.response?.data?.detail ?? "Impossibile caricare la serie";
+		yield put(getSeriesForSymbolFailed(msg));
+	}
+}
+
 export function* dataWatcher() {
-	yield takeLatest(fetchCatalogRequest.type, fetchCatalogWorker);
+	yield takeLatest(fetchCatalogRequest.type, fetchCatalogEffect);
+	yield takeLatest(getSeriesForSymbolRequest.type, getSeriesForSymbolEffect);
 }

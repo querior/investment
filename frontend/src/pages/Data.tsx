@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Input, Table, Tabs, Typography } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import { useNavigate } from "react-router-dom";
+import { Input, Table, Tabs, Tooltip, Typography } from "antd";
+import { EyeOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { fetchCatalogRequest, SeriesEntry } from "../features/data/reducer";
 import { RootState } from "../store/reducers";
 
 const { Title } = Typography;
 
-const columns: ColumnsType<SeriesEntry> = [
+const buildColumns = (onView: (id: string) => void, onRefresh: (record: SeriesEntry) => void): ColumnsType<SeriesEntry> => [
 	{
 		title: "Symbol",
 		dataIndex: "symbol",
@@ -43,22 +44,59 @@ const columns: ColumnsType<SeriesEntry> = [
 		align: "right",
 		render: (v) => v?.toLocaleString() ?? "—",
 	},
+	{
+		title: "",
+		key: "actions",
+		width: 80,
+		align: "center",
+		render: (_, record) => (
+			<div className="flex items-center justify-center gap-3">
+				<Tooltip title="View">
+					<EyeOutlined
+						className="cursor-pointer text-gray-400 hover:text-blue-500"
+						onClick={() => onView(record.symbol)}
+					/>
+				</Tooltip>
+				<Tooltip title="Refresh">
+					<ReloadOutlined
+						className="cursor-pointer text-gray-400 hover:text-green-500"
+						onClick={() => onRefresh(record)}
+					/>
+				</Tooltip>
+			</div>
+		),
+	},
 ];
 
 export default function Data() {
 	const dispatch = useDispatch();
+	const navigate = useNavigate();
 	const { catalog, loading, filter } = useSelector((s: RootState) => s.data);
+	const [activeTab, setActiveTab] = useState<"raw" | "pillars">("raw");
 
-	const handleSearch = (value: string) => {
+	const columns = buildColumns(
+		(id) => navigate(`/analysis/data/${id}`),
+		(_record) => { /* TODO: dispatch ingest refresh */ }
+	);
+
+	const fetchCatalog = (category: "raw" | "pillars", filterValue?: string) => {
 		dispatch(
 			fetchCatalogRequest({
 				page: 1,
 				limit: 10,
-				data_category: catalog.active_category,
+				data_category: category,
 				orderBy: "symbol",
-				filter: value,
+				filter: filterValue,
 			})
 		);
+	};
+
+	const handleSearch = (value: string) => fetchCatalog(activeTab, value);
+
+	const handleTabChange = (key: string) => {
+		const category = key as "raw" | "pillars";
+		setActiveTab(category);
+		fetchCatalog(category, filter);
 	};
 
 	const tabs = [
@@ -69,7 +107,8 @@ export default function Data() {
 				<Table
 					rowKey="id"
 					columns={columns}
-					dataSource={catalog.active_category === "raw" ? catalog.items : []}
+					dataSource={activeTab === "raw" ? catalog.items : []}
+					loading={loading}
 					locale={{ emptyText: "No data available" }}
 					pagination={false}
 					size="small"
@@ -83,9 +122,7 @@ export default function Data() {
 				<Table
 					rowKey="id"
 					columns={columns}
-					dataSource={
-						catalog.active_category === "pillars" ? catalog.items : []
-					}
+					dataSource={activeTab === "pillars" ? catalog.items : []}
 					loading={loading}
 					locale={{ emptyText: "No data available" }}
 					pagination={false}
@@ -96,16 +133,8 @@ export default function Data() {
 	];
 
 	useEffect(() => {
-		dispatch(
-			fetchCatalogRequest({
-				page: 1,
-				limit: 10,
-				data_category: "raw",
-				orderBy: "name",
-				filter: undefined,
-			})
-		);
-	}, [dispatch]);
+		fetchCatalog("raw");
+	}, []);
 
 	return (
 		<div className="p-6 space-y-4">
@@ -117,12 +146,12 @@ export default function Data() {
 				placeholder="Cerca per ticker o descrizione…"
 				prefix={<SearchOutlined className="text-gray-400" />}
 				value={filter}
-				onChange={(e) => handleSearch(e.target.value)}
+				onChange={(e: ChangeEvent<HTMLInputElement>) => handleSearch(e.target.value)}
 				allowClear
 				className="max-w-sm"
 			/>
 
-			<Tabs items={tabs} />
+			<Tabs activeKey={activeTab} onChange={handleTabChange} items={tabs} />
 		</div>
 	);
 }
