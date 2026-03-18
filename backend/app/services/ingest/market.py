@@ -61,6 +61,35 @@ def ingest_market_delta(db: Session, symbol: str, source: str = "YAHOO") -> int:
   return count
   
   
+def ingest_market_full(db: Session, symbol: str, source: str = "YAHOO") -> int:
+  ticker = yf.Ticker(symbol)
+  data = ticker.history(period="max", auto_adjust=True)
+  if data.empty:
+    return 0
+
+  count = 0
+  for idx, row in data.iterrows():
+    db.merge(
+      MarketPrice(
+        symbol=symbol,
+        date=idx.date(),
+        open=float(row["Open"]),
+        high=float(row["High"]),
+        low=float(row["Low"]),
+        close=float(row["Close"]),
+        volume=float(row["Volume"]),
+        source=source,
+      )
+    )
+    count += 1
+
+  if count > 0:
+    _set_last_date(db, f"MK:{symbol}", max(data.index.date))
+
+  db.commit()
+  return count
+
+
 def ingest_all_market_delta(db: Session):
   for cfg in ASSET_PROXIES.values():
     ingest_market_delta(db, cfg["symbol"], cfg["source"])

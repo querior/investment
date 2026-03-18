@@ -2,12 +2,12 @@ PROCESSED_MAP = [
 	# Growth
   ("CUMFNS","CUMFNS","level"),
   ("INDPRO","INDPRO_YOY","yoy"),
-  ("GDPC1","GDPC1_YOY","yoy"),
+  ("W875RX1","W875RX1_YOY","yoy"),
 
 	# Inflation
   ("CPIAUCSL","CPI_YOY","yoy"),
-  ("PPIACO","PPI_YOY","yoy"),
-  ("T5YIE","T5YIE","level"),
+  ("PPIACO","PPIACO_YOY","yoy"),
+  ("EXPINF5YR","EXPINF5YR","level"),
 
 	# Policy
   ("FEDFUNDS","FEDFUNDS","level"),

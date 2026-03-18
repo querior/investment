@@ -1,29 +1,37 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
+export type DataCategory = "macro_raw" | "macro_processed" | "pillar" | "scores" | "market";
+export type CatalogCategory = "macro_raw" | "macro_processed" | "pillars" | "scores" | "market";
+
 export type SeriesEntry = {
 	id: string;
 	symbol: string;
 	description: string;
+	formula: string | null;
 	source: string;
 	frequency: string;
 	first_date: string | null;
 	last_date: string | null;
 	row_count: number;
-	data_category: "raw" | "pillar";
+	data_category: DataCategory;
 };
 
 export type Catalog = {
 	items: SeriesEntry[];
-	active_category: "raw" | "pillars";
+	active_category: CatalogCategory;
 	counters: {
-		raw: number;
+		macro_raw: number;
+		macro_processed: number;
 		pillars: number;
+		scores: number;
+		market: number;
 	};
 };
 
 export type SeriesPoint = {
 	date: string;
 	value: number;
+	regime?: string;
 };
 
 export type SeriesDetail = {
@@ -34,8 +42,17 @@ export type SeriesDetail = {
 	first_date: string | null;
 	last_date: string | null;
 	row_count: number;
-	data_category: "raw" | "pillar";
+	data_category: DataCategory;
 	points: SeriesPoint[];
+};
+
+export type IngestMode = "delta" | "full";
+
+export type IngestResult = {
+	symbol: string;
+	mode: string;
+	inserted: number | null;
+	detail: string;
 };
 
 export type DataState = {
@@ -44,20 +61,27 @@ export type DataState = {
 	loading: boolean;
 	error: string | null;
 	currentSeries: SeriesDetail | null;
+	ingestLoading: boolean;
+	lastIngestResult: IngestResult | null;
 };
 
 const initialState: DataState = {
 	catalog: {
 		items: [],
-		active_category: "raw",
+		active_category: "macro_raw",
 		counters: {
-			raw: 0,
+			macro_raw: 0,
+			macro_processed: 0,
 			pillars: 0,
+			scores: 0,
+			market: 0,
 		},
 	},
 	loading: false,
 	error: null,
 	currentSeries: null,
+	ingestLoading: false,
+	lastIngestResult: null,
 };
 
 const slice = createSlice({
@@ -69,7 +93,7 @@ const slice = createSlice({
 			action: PayloadAction<{
 				page: number;
 				limit: number;
-				data_category: "raw" | "pillars";
+				data_category: CatalogCategory;
 				orderBy: string;
 				filter: string | undefined;
 			}>
@@ -106,6 +130,21 @@ const slice = createSlice({
 			state.loading = false;
 			state.error = action.payload;
 		},
+		ingestRequest(
+			state,
+			_action: PayloadAction<{ symbol: string; mode: IngestMode }>
+		) {
+			state.ingestLoading = true;
+			state.error = null;
+		},
+		ingestSuccess(state, action: PayloadAction<IngestResult>) {
+			state.ingestLoading = false;
+			state.lastIngestResult = action.payload;
+		},
+		ingestFailure(state, action: PayloadAction<string>) {
+			state.ingestLoading = false;
+			state.error = action.payload;
+		},
 	},
 });
 
@@ -116,5 +155,8 @@ export const {
 	getSeriesForSymbolRequest,
 	getSeriesForSymbolSuccess,
 	getSeriesForSymbolFailed,
+	ingestRequest,
+	ingestSuccess,
+	ingestFailure,
 } = slice.actions;
 export default slice.reducer;

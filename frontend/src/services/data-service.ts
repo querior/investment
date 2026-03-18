@@ -1,10 +1,10 @@
 import { api } from "./api";
-import { Catalog, SeriesDetail } from "../features/data/reducer";
+import { Catalog, SeriesDetail, type CatalogCategory, type IngestMode, type IngestResult } from "../features/data/reducer";
 
 export async function getCatalogApi(params: {
 	page: number;
 	limit: number;
-	data_category: "raw" | "pillars";
+	data_category: CatalogCategory;
 	orderBy: string;
 	filter: string | undefined;
 }): Promise<Catalog> {
@@ -25,5 +25,13 @@ export async function getSeriesForSymbolApi(params: {
 	if (startDate) query.append("start_date", startDate);
 	if (endDate) query.append("end_date", endDate);
 	const res = await api.get<SeriesDetail>(`/data/series?${query.toString()}`);
+	return res.data;
+}
+
+export async function ingestSeriesApi(params: {
+	symbol: string;
+	mode: IngestMode;
+}): Promise<IngestResult> {
+	const res = await api.post<IngestResult>("/ingest/series", params);
 	return res.data;
 }

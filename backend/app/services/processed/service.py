@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from app.db.macro_processed import MacroProcessed
 from app.db.macro_raw import MacroRaw
 from app.services.transforms.normalization import compute_z_score, clip
+import logging
+
+logger = logging.getLogger(__name__)
 
 WINDOW = 60 # mesi
 
@@ -34,22 +37,19 @@ def process_indicator(
     df["value"] = df["value"].diff()
     
   df = df.dropna()
-  
+
   # --- z-score ---
-  z = compute_z_score(df["value"], window)
-  z = clip(z)
-  
+  df["z_score"] = clip(compute_z_score(df["value"], window))
+  df = df.dropna(subset=["z_score"])
+
   for date, row in df.iterrows():
-    if pd.isna(z.loc[date]):
-      continue
-    
     db.merge(
       MacroProcessed(
         date=date,
         indicator=target_indicator,
         value=float(row["value"]),
-        z_score=float(z.loc[date])
+        z_score=float(row["z_score"])
       )
     )
-    
+
   db.commit()

@@ -1,13 +1,13 @@
 PILLARS = {
     "Growth": [
       "CUMFNS",          # PMI proxy
-      "GDPC1_YOY",
+      "W875RX1_YOY",
       "INDPRO_YOY",
     ],
     "Inflation": [
       "CPI_YOY",
-      "PPI_YOY",
-      "T5YIE",
+      "PPIACO_YOY",
+      "EXPINF5YR",
     ],
     "Policy": [
       "FEDFUNDS",

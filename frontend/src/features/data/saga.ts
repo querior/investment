@@ -1,5 +1,5 @@
 import { call, put, takeLatest } from "redux-saga/effects";
-import { getCatalogApi, getSeriesForSymbolApi } from "../../services/data-service";
+import { getCatalogApi, getSeriesForSymbolApi, ingestSeriesApi } from "../../services/data-service";
 import {
 	fetchCatalogSuccess,
 	fetchCatalogFailure,
@@ -7,6 +7,9 @@ import {
 	getSeriesForSymbolRequest,
 	getSeriesForSymbolSuccess,
 	getSeriesForSymbolFailed,
+	ingestRequest,
+	ingestSuccess,
+	ingestFailure,
 } from "./reducer";
 
 function* fetchCatalogEffect(
@@ -22,10 +25,7 @@ function* fetchCatalogEffect(
 				fetchCatalogSuccess({
 					items: [],
 					active_category: action.payload.data_category,
-					counters: {
-						raw: 0,
-						pillars: 0,
-					},
+					counters: { macro_raw: 0, macro_processed: 0, pillars: 0, scores: 0, market: 0 },
 				})
 			);
 		} else {
@@ -48,7 +48,18 @@ function* getSeriesForSymbolEffect(
 	}
 }
 
+function* ingestEffect(action: ReturnType<typeof ingestRequest>): any {
+	try {
+		const result = yield call(ingestSeriesApi, action.payload);
+		yield put(ingestSuccess(result));
+	} catch (e: any) {
+		const msg = e?.response?.data?.detail ?? "Errore durante l'ingestion";
+		yield put(ingestFailure(msg));
+	}
+}
+
 export function* dataWatcher() {
 	yield takeLatest(fetchCatalogRequest.type, fetchCatalogEffect);
 	yield takeLatest(getSeriesForSymbolRequest.type, getSeriesForSymbolEffect);
+	yield takeLatest(ingestRequest.type, ingestEffect);
 }

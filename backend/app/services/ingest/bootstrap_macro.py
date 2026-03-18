@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 INDICATORS = [
-	"CUMFNS","GDPC1","INDPRO",
+	"CUMFNS","GDPC1","INDPRO", "PPIACO", "EXPINF5YR",
 	"CPIAUCSL","T5YIE",
 	"FEDFUNDS","T10Y2Y",
 	"VIXCLS","BAA10Y",

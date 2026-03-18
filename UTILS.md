@@ -30,3 +30,5 @@ docker logs -f <running-container-name>
 ## Interazione Claude
 
 "Leggi CLAUDE.md e tutti i file in docs/ — stiamo lavorando al progetto investment"
+
+Resume: claude --resume d3bca77a-be7c-4b8c-a51c-3b57b44e85eb

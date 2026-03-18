@@ -1,15 +1,35 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { Input, Table, Tabs, Tooltip, Typography } from "antd";
+import {
+	Input,
+	Modal,
+	notification,
+	Radio,
+	Table,
+	Tabs,
+	Tooltip,
+	Typography,
+	Alert,
+	Collapse,
+} from "antd";
 import { EyeOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { fetchCatalogRequest, SeriesEntry } from "../features/data/reducer";
+import {
+	fetchCatalogRequest,
+	ingestRequest,
+	SeriesEntry,
+	type CatalogCategory,
+	type IngestMode,
+} from "../features/data/reducer";
 import { RootState } from "../store/reducers";
 
 const { Title } = Typography;
 
-const buildColumns = (onView: (id: string) => void, onRefresh: (record: SeriesEntry) => void): ColumnsType<SeriesEntry> => [
+const buildColumns = (
+	onView: (id: string) => void,
+	onRefresh: (record: SeriesEntry) => void
+): ColumnsType<SeriesEntry> => [
 	{
 		title: "Symbol",
 		dataIndex: "symbol",
@@ -19,8 +39,21 @@ const buildColumns = (onView: (id: string) => void, onRefresh: (record: SeriesEn
 	},
 	{
 		title: "Description",
-		dataIndex: "description",
 		key: "description",
+		render: (_, record) => (
+			<div>
+				<div>{record.description}</div>
+				{record.formula && (
+					<div className="text-xs text-gray-400 font-mono mt-0.5">{record.formula}</div>
+				)}
+			</div>
+		),
+	},
+	{
+		title: "Frequency",
+		dataIndex: "frequency",
+		key: "frequency",
+		width: 100,
 	},
 	{
 		title: "Initial date",
@@ -71,19 +104,64 @@ const buildColumns = (onView: (id: string) => void, onRefresh: (record: SeriesEn
 export default function Data() {
 	const dispatch = useDispatch();
 	const navigate = useNavigate();
-	const { catalog, loading, filter } = useSelector((s: RootState) => s.data);
-	const [activeTab, setActiveTab] = useState<"raw" | "pillars">("raw");
+	const { catalog, loading, filter, ingestLoading, lastIngestResult, error } =
+		useSelector((s: RootState) => s.data);
+	const [activeTab, setActiveTab] = useState<CatalogCategory>("macro_raw");
+	const [page, setPage] = useState(1);
+	const PAGE_SIZE = 10;
+	const [ingestModal, setIngestModal] = useState<{
+		open: boolean;
+		record: SeriesEntry | null;
+	}>({ open: false, record: null });
+	const [ingestMode, setIngestMode] = useState<IngestMode>("delta");
+
+	const prevIngestLoading = useRef(false);
+	useEffect(() => {
+		if (prevIngestLoading.current && !ingestLoading) {
+			if (error) {
+				notification.error({
+					message: "Ingestion fallita",
+					description: error,
+				});
+			} else if (lastIngestResult) {
+				notification.success({
+					message: "Ingestion completata",
+					description: lastIngestResult.detail,
+				});
+			}
+		}
+		prevIngestLoading.current = ingestLoading;
+	}, [ingestLoading, error, lastIngestResult]);
+
+	const totalForTab = catalog.counters[activeTab];
+
+	const openIngestModal = (record: SeriesEntry) => {
+		setIngestMode("delta");
+		setIngestModal({ open: true, record });
+	};
+
+	const handleIngestConfirm = () => {
+		if (!ingestModal.record) return;
+		dispatch(
+			ingestRequest({ symbol: ingestModal.record.symbol, mode: ingestMode })
+		);
+		setIngestModal({ open: false, record: null });
+	};
 
 	const columns = buildColumns(
 		(id) => navigate(`/analysis/data/${id}`),
-		(_record) => { /* TODO: dispatch ingest refresh */ }
+		(record) => openIngestModal(record)
 	);
 
-	const fetchCatalog = (category: "raw" | "pillars", filterValue?: string) => {
+	const fetchCatalog = (
+		category: CatalogCategory,
+		p: number,
+		filterValue?: string
+	) => {
 		dispatch(
 			fetchCatalogRequest({
-				page: 1,
-				limit: 10,
+				page: p,
+				limit: PAGE_SIZE,
 				data_category: category,
 				orderBy: "symbol",
 				filter: filterValue,
@@ -91,49 +169,36 @@ export default function Data() {
 		);
 	};
 
-	const handleSearch = (value: string) => fetchCatalog(activeTab, value);
+	const handleSearch = (value: string) => {
+		setPage(1);
+		fetchCatalog(activeTab, 1, value);
+	};
 
 	const handleTabChange = (key: string) => {
-		const category = key as "raw" | "pillars";
+		const category = key as CatalogCategory;
 		setActiveTab(category);
-		fetchCatalog(category, filter);
+		setPage(1);
+		fetchCatalog(category, 1, filter);
+	};
+
+	const handlePageChange = (newPage: number) => {
+		setPage(newPage);
+		fetchCatalog(activeTab, newPage, filter);
 	};
 
 	const tabs = [
+		{ key: "macro_raw", label: `Macro Raw (${catalog.counters.macro_raw})` },
 		{
-			key: "raw",
-			label: `Series (${catalog.counters.raw})`,
-			children: (
-				<Table
-					rowKey="id"
-					columns={columns}
-					dataSource={activeTab === "raw" ? catalog.items : []}
-					loading={loading}
-					locale={{ emptyText: "No data available" }}
-					pagination={false}
-					size="small"
-				/>
-			),
+			key: "macro_processed",
+			label: `Macro Processed (${catalog.counters.macro_processed})`,
 		},
-		{
-			key: "pillars",
-			label: `Pillars (${catalog.counters.pillars})`,
-			children: (
-				<Table
-					rowKey="id"
-					columns={columns}
-					dataSource={activeTab === "pillars" ? catalog.items : []}
-					loading={loading}
-					locale={{ emptyText: "No data available" }}
-					pagination={false}
-					size="small"
-				/>
-			),
-		},
+		{ key: "pillars", label: `Pillars (${catalog.counters.pillars})` },
+		{ key: "scores", label: `Scores (${catalog.counters.scores})` },
+		{ key: "market", label: `Market (${catalog.counters.market})` },
 	];
 
 	useEffect(() => {
-		fetchCatalog("raw");
+		fetchCatalog("macro_raw", 1);
 	}, []);
 
 	return (
@@ -146,12 +211,106 @@ export default function Data() {
 				placeholder="Cerca per ticker o descrizione…"
 				prefix={<SearchOutlined className="text-gray-400" />}
 				value={filter}
-				onChange={(e: ChangeEvent<HTMLInputElement>) => handleSearch(e.target.value)}
+				onChange={(e: ChangeEvent<HTMLInputElement>) =>
+					handleSearch(e.target.value)
+				}
 				allowClear
 				className="max-w-sm"
 			/>
 
 			<Tabs activeKey={activeTab} onChange={handleTabChange} items={tabs} />
+
+			{activeTab === "macro_processed" && (
+				<Collapse
+					size="small"
+					ghost
+					items={[
+						{
+							key: "formula",
+							label: "Come vengono processati i dati raw?",
+							children: (
+								<div className="space-y-2 text-sm text-gray-700">
+									<p>
+										Ogni serie raw viene trasformata e normalizzata in due
+										passaggi:
+									</p>
+									<ol className="list-decimal list-inside space-y-1 pl-2">
+										<li>
+											<strong>Trasformazione</strong>
+											<ul className="list-disc list-inside pl-4 mt-1 space-y-1 text-gray-600">
+												<li>
+													<code>yoy</code> — variazione anno su anno:{" "}
+													<code>(xₜ / xₜ₋₁₂ − 1) × 100</code>
+												</li>
+												<li>
+													<code>level</code> — variazione mensile assoluta:{" "}
+													<code>xₜ − xₜ₋₁</code>
+												</li>
+											</ul>
+										</li>
+										<li>
+											<strong>Z-score rolling</strong> su finestra di 60 mesi:{" "}
+											<code>z = (x − μ) / σ</code>, clippato a ±3
+										</li>
+									</ol>
+									<p className="text-gray-500 text-xs">
+										Le prime 60 osservazioni vengono scartate (warm-up della
+										rolling window).
+									</p>
+								</div>
+							),
+						},
+					]}
+				/>
+			)}
+
+			<Table
+				rowKey="id"
+				columns={columns}
+				dataSource={catalog.items}
+				loading={loading}
+				locale={{ emptyText: "No data available" }}
+				pagination={{
+					current: page,
+					pageSize: PAGE_SIZE,
+					total: totalForTab,
+					showSizeChanger: false,
+					onChange: handlePageChange,
+				}}
+				size="small"
+			/>
+
+			<Modal
+				title={`Ingest — ${ingestModal.record?.symbol ?? ""}`}
+				open={ingestModal.open}
+				onOk={handleIngestConfirm}
+				onCancel={() => setIngestModal({ open: false, record: null })}
+				okText="Avvia"
+				cancelText="Annulla"
+				confirmLoading={ingestLoading}
+			>
+				{ingestModal.record?.data_category === "macro_raw" ||
+				ingestModal.record?.data_category === "market" ? (
+					<Radio.Group
+						value={ingestMode}
+						onChange={(e) => setIngestMode(e.target.value)}
+						className="flex flex-col gap-2 mt-2"
+					>
+						<Radio value="delta">
+							Delta — solo dati mancanti dall'ultima data
+						</Radio>
+						<Radio value="full">Full — scarica l'intera serie storica</Radio>
+					</Radio.Group>
+				) : (
+					<Alert
+						type="info"
+						showIcon
+						message="Ricalcolo serie derivata"
+						description={`La serie "${ingestModal.record?.symbol}" verrà ricalcolata a partire dai dati raw di origine.`}
+						className="mt-2"
+					/>
+				)}
+			</Modal>
 		</div>
 	);
 }
