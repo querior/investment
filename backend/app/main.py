@@ -10,13 +10,21 @@ import logging
 from app.jobs.macro_pipeline import run_macro_pipeline
 from app.jobs.market_pipeline import run_market_pipeline
 from app.jobs.scheduler import start_scheduler
+from app.scripts.seed_config import seed_if_needed
+from app.db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.warning("**** Start ingestion job ****")
-    
+
+    db = SessionLocal()
+    try:
+        seed_if_needed(db)
+    finally:
+        db.close()
+
     start_scheduler()
     
     Thread(

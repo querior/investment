@@ -18,7 +18,7 @@ def get_allocation(date: str, db: Session = Depends(get_db)):
     return {"error": "No pillar data for date"}
   
   pillars = {r.pillar: r.score for r in rows} # type: ignore
-  allocation_deltas = compute_allocation_deltas(pillars) # type: ignore
+  allocation_deltas = compute_allocation_deltas(db, pillars) # type: ignore
   
   return {
     "date": date,

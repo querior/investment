@@ -6,12 +6,6 @@ import yfinance as yf
 from app.db.meta_ingestion import IngestionState
 from app.db.market_price import MarketPrice
 
-ASSET_PROXIES = {
-	"Equity": {"symbol":"SPY","source":"YAHOO"},
-	"Bond": {"symbol":"IEF","source":"YAHOO"},
-	"Commodities": {"symbol":"DBC","source":"YAHOO"},
-	"Cash": {"symbol":"BIL","source":"YAHOO"},
-}
 
 def _get_last_date(db: Session, key: str) -> date | None:
   row = db.query(IngestionState).filter(IngestionState.key == key).one_or_none()
@@ -91,5 +85,6 @@ def ingest_market_full(db: Session, symbol: str, source: str = "YAHOO") -> int:
 
 
 def ingest_all_market_delta(db: Session):
-  for cfg in ASSET_PROXIES.values():
-    ingest_market_delta(db, cfg["symbol"], cfg["source"])
+  from app.services.config_repo import get_market_symbols
+  for symbol, source in get_market_symbols(db):
+    ingest_market_delta(db, symbol, source)

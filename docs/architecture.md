@@ -35,6 +35,7 @@ un bus di capitale e segnali condivisi. Nessun layer conosce i dettagli interni 
 ```
 backend/app/
 ├── services/
+│   ├── config_repo.py  ← lettura configurazione da DB (unico punto)
 │   ├── allocation/     ← Layer Long (esistente)
 │   ├── pillars/        ← Layer Long (esistente)
 │   ├── ingest/         ← Data Layer (esistente)
@@ -47,8 +48,46 @@ backend/app/
 │   ├── macro_pipeline.py   ← orchestrazione Long
 │   ├── market_pipeline.py  ← orchestrazione Data Layer
 │   └── scheduler.py
+├── scripts/
+│   └── seed_config.py  ← popola le tabelle di configurazione
 └── backtest/               ← trasversale a tutti i layer
 ```
+
+## Config Layer
+
+La configurazione del sistema (indicatori, pillar, score, allocation) è interamente
+su database e non più hardcoded. Il flusso di accesso è:
+
+```
+DB (tabelle config)
+     │
+     ▼
+services/config_repo.py   ← unico punto di lettura
+     │
+     ├── services/processed/orchestrator.py
+     ├── services/pillars/service.py
+     ├── services/allocation/engine.py
+     ├── services/ingest/market.py
+     └── api/ (data, ingest, allocation)
+```
+
+### Tabelle di configurazione
+
+| Tabella | Contenuto |
+|---|---|
+| `indicators` | Ticker FRED con source, frequency, description |
+| `market_symbols` | Simboli Yahoo/IBKR con asset_type |
+| `processed_indicators` | Trasformazioni raw→processed (yoy/level/delta, window, clip) |
+| `pillars` | Definizione dei 4 pillar |
+| `pillar_components` | Mapping pillar → processed indicator |
+| `composite_scores` | Definizione degli score compositi (es. MacroScore) |
+| `composite_score_weights` | Pesi pillar per ogni score |
+| `regime_thresholds` | Soglie di regime per ogni score |
+| `asset_classes` | Asset class con neutral_weight, max_weight, proxy symbol |
+| `sensitivity_coefficients` | Matrice di sensibilità pillar × asset |
+| `allocation_parameters` | Parametri scalari engine (K, MAX_ABS) |
+
+Per popolare le tabelle: `python -m app.scripts.seed_config`
 
 ## Data Layer
 Responsabilità: unica fonte di verità per i dati di mercato.

@@ -9,32 +9,23 @@ from app.services.ingest.bootstrap_macro import ingest_all_macro
 from app.services.ingest.fred import ingest_fred_series_delta, ingest_fred_series_full
 from app.services.ingest.market import ingest_market_delta, ingest_market_full
 from app.services.processed.service import process_indicator
-from app.services.processed.config import PROCESSED_MAP
-from app.services.pillars.config import PILLARS
 from app.services.pillars.service import compute_pillars
+from app.services.config_repo import get_fred_tickers, get_market_symbols, get_processed_map, get_pillars
 
 router = APIRouter(tags=["ingest"])
-
-# Indicatori FRED ingestionabili direttamente (serie raw, non derivate)
-FRED_RAW_INDICATORS = {
-    "CUMFNS", "GDPC1", "W875RX1", "INDPRO", "CPIAUCSL", "PPIFIS", "PPIACO",
-    "T5YIE", "FEDFUNDS", "T10Y2Y", "VIXCLS", "BAA10Y", "NFCI", "EXPINF5YR",
-}
-
-MARKET_SYMBOLS = {"SPY", "IEF", "DBC", "BIL"}
-
-PILLAR_NAMES = set(PILLARS.keys())
-
-# mappa target_indicator → (src, tgt, transform) per lookup rapido
-_TARGET_TO_PROCESS = {tgt: (src, tgt, tf) for src, tgt, tf in PROCESSED_MAP}
 
 
 def _compute_pillar(db: Session, pillar: str) -> int:
     """Ricalcola process_indicator per tutti gli indicatori del pillar, poi compute_pillars."""
-    for indicator in PILLARS[pillar]:
-        if indicator in _TARGET_TO_PROCESS:
-            src, tgt, tf = _TARGET_TO_PROCESS[indicator]
-            process_indicator(db, src, tgt, tf)
+    pillars = get_pillars(db)
+    target_to_process = {
+        tgt: (src, tgt, tf, resample, window, clip)
+        for src, tgt, tf, resample, window, clip in get_processed_map(db)
+    }
+    for indicator in pillars.get(pillar, []):
+        if indicator in target_to_process:
+            src, tgt, tf, resample, window, clip = target_to_process[indicator]
+            process_indicator(db, src, tgt, tf, resample=resample, window=window, clip_limit=clip)
     compute_pillars(db)
     from sqlalchemy import func
     from app.db.macro_pillar import MacroPillar
@@ -59,34 +50,38 @@ def ingest_series(
 ):
     symbol = body.symbol
 
+    processed_map = get_processed_map(db)
+    pillars = get_pillars(db)
+    target_to_process = {tgt: (src, tgt, tf, resample, window, clip) for src, tgt, tf, resample, window, clip in processed_map}
+    market_symbols = {sym for sym, _ in get_market_symbols(db)}
+    fred_tickers = get_fred_tickers(db)
+
     # MacroScore — ricalcola tutta la pipeline
     if symbol == "MacroScore":
-        n_indicators = len(PROCESSED_MAP)
-        for src, tgt, tf in PROCESSED_MAP:
-            process_indicator(db, src, tgt, tf)
+        for src, tgt, tf, resample, window, clip in processed_map:
+            process_indicator(db, src, tgt, tf, resample=resample, window=window, clip_limit=clip)
         compute_pillars(db)
         return {
             "symbol": symbol,
             "mode": "computed",
             "inserted": None,
-            "detail": f"Pipeline completa: {n_indicators} indicatori processati, pillar scores ricalcolati",
+            "detail": f"Pipeline completa: {len(processed_map)} indicatori processati, pillar scores ricalcolati",
         }
 
     # Pillar — ricalcola gli indicatori del pillar specifico
-    if symbol in PILLAR_NAMES:
-        n_indicators = len(PILLARS[symbol])
+    if symbol in pillars:
         inserted = _compute_pillar(db, symbol)
         return {
             "symbol": symbol,
             "mode": "computed",
             "inserted": inserted,
-            "detail": f"Pillar {symbol}: {n_indicators} indicatori processati, {inserted} score calcolati",
+            "detail": f"Pillar {symbol}: {len(pillars[symbol])} indicatori processati, {inserted} score calcolati",
         }
 
     # Macro processed — ricalcola process_indicator per il target specifico
-    if symbol in _TARGET_TO_PROCESS:
-        src, tgt, tf = _TARGET_TO_PROCESS[symbol]
-        process_indicator(db, src, tgt, tf)
+    if symbol in target_to_process:
+        src, tgt, tf, resample, window, clip = target_to_process[symbol]
+        process_indicator(db, src, tgt, tf, resample=resample, window=window, clip_limit=clip)
         from sqlalchemy import func
         from app.db.macro_processed import MacroProcessed
         count = db.query(func.count(MacroProcessed.date)).filter(MacroProcessed.indicator == tgt).scalar() or 0
@@ -100,7 +95,7 @@ def ingest_series(
     symbol_upper = symbol.upper()
 
     # Market (yfinance)
-    if symbol_upper in MARKET_SYMBOLS:
+    if symbol_upper in market_symbols:
         if body.mode == "delta":
             inserted = ingest_market_delta(db, symbol_upper)
             detail = (
@@ -114,7 +109,7 @@ def ingest_series(
         return {"symbol": symbol_upper, "mode": body.mode, "inserted": inserted, "detail": detail}
 
     # FRED raw
-    if symbol_upper in FRED_RAW_INDICATORS:
+    if symbol_upper in fred_tickers:
         fred = Fred(api_key=os.getenv("FRED_API_KEY"))
         if body.mode == "delta":
             inserted = ingest_fred_series_delta(db, symbol_upper, fred)

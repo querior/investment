@@ -58,7 +58,7 @@ def run_backtest(
             continue
 
         pillars = {r.pillar: r.score for r in pillars_rows}
-        weights = compute_allocation(pillars)
+        weights = compute_allocation(db, pillars)
 
         # salva pesi
         for asset, w in weights.items():

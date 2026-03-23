@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.db.macro_processed import MacroProcessed
 from app.db.macro_pillar import MacroPillar
-from app.services.pillars.config import PILLARS
+from app.services.config_repo import get_pillars
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,8 @@ def compute_pillars(
     end_date=None,
 ):
   logger.info("*** compute pillars ***")
-	# prendi tutte le date disponibili
+  pillars = get_pillars(db)
+
   q = db.query(MacroProcessed.date).distinct()
   if start_date:
     q = q.filter(MacroProcessed.date >= start_date)
@@ -22,7 +23,7 @@ def compute_pillars(
   dates = [d[0] for d in q.order_by(MacroProcessed.date).all()]
 
   for date in dates:
-    for pillar, indicators in PILLARS.items():
+    for pillar, indicators in pillars.items():
       rows = (
           db.query(MacroProcessed.z_score)
 	          .filter(MacroProcessed.date == date)

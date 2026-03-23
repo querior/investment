@@ -1,10 +1,10 @@
-from sqlalchemy import Column, String, Date, Float
+from sqlalchemy import Column, String, Date, Float, ForeignKey
 from app.db.session import Base
 
 class MarketPrice(Base):
   __tablename__ = "market_prices"
 
-  symbol = Column(String, primary_key=True)  # es: "SPY", "IEF", "DBC", "BIL"
+  symbol = Column(String, ForeignKey("market_symbols.symbol"), primary_key=True)
   date = Column(Date, primary_key=True)
   open = Column(Float, nullable=False)
   high = Column(Float, nullable=False)

@@ -9,110 +9,25 @@ from app.db.macro_raw import MacroRaw
 from app.db.macro_processed import MacroProcessed
 from app.db.macro_pillar import MacroPillar
 from app.db.market_price import MarketPrice
-from app.services.processed.config import PROCESSED_MAP
-from app.services.pillars.config import PILLARS
+from app.services.config_repo import (
+    get_indicator_meta,
+    get_market_symbol_meta,
+    get_processed_meta,
+    get_pillar_meta,
+    get_macro_score_weights,
+    get_regime_thresholds,
+    get_composite_score_meta,
+)
 
 router = APIRouter(tags=["data"])
 
-# Serie raw scaricate direttamente da FRED
-MACRO_META = {
-    "CUMFNS":   {"description": "Capacity Utilization: Manufacturing",                          "frequency": "MONTHLY"},
-    "GDPC1":    {"description": "Real Gross Domestic Product",                                  "frequency": "QUARTERLY"},
-    "W875RX1":  {"description": "Real personal income excluding current transfer receipts",     "frequency": "MONTHLY"},    
-    "INDPRO":   {"description": "Industrial Production Index",                                  "frequency": "MONTHLY"},
-    "CPIAUCSL": {"description": "Consumer Price Index (All Urban)",                             "frequency": "MONTHLY"},
-    "PPIFIS":   {"description": "Producer Price Index",                                         "frequency": "MONTHLY"},
-    "PPIACO":   {"description": "Producer Price Index by Commodity: All Commodities",           "frequency": "MONTHLY"},
-    "EXPINF5YR":{"description": "5-Year Expected Inflation",                                    "frequency": "MONTHLY"},
-    "T5YIE":    {"description": "5-Year Breakeven Inflation Rate",                              "frequency": "DAILY"},
-    "FEDFUNDS": {"description": "Federal Funds Effective Rate",                                 "frequency": "MONTHLY"},
-    "T10Y2Y":   {"description": "10-Year Treasury Minus 2-Year Treasury",                       "frequency": "DAILY"},
-    "VIXCLS":   {"description": "CBOE Volatility Index (VIX)",                                  "frequency": "DAILY"},
-    "BAA10Y":   {"description": "Moody's Baa Corporate Bond Spread",                            "frequency": "DAILY"},
-    "NFCI":     {"description": "Chicago Fed National Financial Conditions",                    "frequency": "WEEKLY"},
-}
 
-_TRANSFORM_LABEL = {
-    "yoy":   "YoY % change",
-    "level": "level",
-    "delta": "monthly delta",
-}
-
-_TRANSFORM_FORMULA = {
-    "yoy":   "(xₜ / xₜ₋₁₂ − 1) × 100  →  z = (x − μ₆₀) / σ₆₀, clip ±3",
-    "level": "xₜ − xₜ₋₁  →  z = (x − μ₆₀) / σ₆₀, clip ±3",
-    "delta": "xₜ − xₜ₋₁  →  z = (x − μ₆₀) / σ₆₀, clip ±3",
-}
-
-# Serie derivate da process_indicator (z-score su raw o trasformazioni)
-PROCESSED_META: dict[str, dict] = {}
-for _src, _tgt, _tf in PROCESSED_MAP:
-    _src_desc = MACRO_META.get(_src, {}).get("description", _src)
-    PROCESSED_META[_tgt] = {
-        "description": f"{_src_desc} — {_TRANSFORM_LABEL.get(_tf, _tf)}",
-        "formula": _TRANSFORM_FORMULA.get(_tf, ""),
-        "source_indicator": _src,
-        "transform": _tf,
-        "frequency": MACRO_META.get(_src, {}).get("frequency", "MONTHLY"),
-    }
-
-MARKET_META = {
-    "SPY": {"description": "S&P 500 ETF (Equity)",                           "frequency": "DAILY"},
-    "IEF": {"description": "iShares 7-10 Year Treasury Bond ETF (Bond)",     "frequency": "DAILY"},
-    "DBC": {"description": "Invesco DB Commodity Index Tracking Fund",       "frequency": "DAILY"},
-    "BIL": {"description": "SPDR Bloomberg 1-3 Month T-Bill ETF (Cash)",     "frequency": "DAILY"},
-}
-
-_PILLAR_LABEL = {
-    "Growth":    "Forza del ciclo economico reale",
-    "Inflation": "Pressione inflattiva realizzata e attesa",
-    "Policy":    "Stance della banca centrale (Fed)",
-    "Risk":      "Stress finanziario e risk aversion",
-}
-
-PILLAR_META: dict[str, dict] = {}
-for _pillar, _indicators in PILLARS.items():
-    PILLAR_META[_pillar] = {
-        "description": _PILLAR_LABEL.get(_pillar, _pillar),
-        "formula": "mean(" + ", ".join(f"z({ind})" for ind in _indicators) + ")",
-        "frequency": "MONTHLY",
-    }
-
-MACRO_SCORE_WEIGHTS = {
-    "Growth":    0.3,
-    "Inflation": -0.3,
-    "Policy":    -0.2,
-    "Risk":      -0.2,
-}
-
-def _build_score_formula(weights: dict) -> str:
-    parts = []
-    for pillar, w in weights.items():
-        sign = "+" if w >= 0 else "−"
-        parts.append(f"{sign} {abs(w)}·{pillar}")
-    return " ".join(parts).lstrip("+ ").strip()
-
-SCORES_META = {
-    "MacroScore": {
-        "description": "MacroScore composito (Growth, Inflation, Policy, Risk)",
-        "formula": _build_score_formula(MACRO_SCORE_WEIGHTS),
-        "frequency": "MONTHLY",
-    },
-}
-
-REGIME_THRESHOLDS = [
-    (0.5,           "Espansione"),
-    (0.0,           "Ripresa"),
-    (-0.5,          "Rallentamento"),
-    (float("-inf"), "Recessione"),
-]
-
-
-def _get_regime(score: float | None) -> str:
+def _get_regime(score: float | None, thresholds: list[tuple[float | None, str]]) -> str:
     if score is None or not math.isfinite(score):
         return "N/A"
-    for threshold, label in REGIME_THRESHOLDS:
-        if score > threshold:
+    for threshold_min, label in thresholds:
+        actual_min = threshold_min if threshold_min is not None else float("-inf")
+        if score > actual_min:
             return label
     return "N/A"
 
@@ -136,11 +51,11 @@ def get_catalog(
 ):
     filter_val = filter if filter and filter != "undefined" else None
 
-    macro_raw_rows      = _query_macro_raw(db, filter_val)
-    macro_proc_rows     = _query_macro_processed(db, filter_val)
-    pillar_rows         = _query_pillars(db, filter_val)
-    scores_rows         = _query_scores(db, filter_val)
-    market_rows         = _query_market(db, filter_val)
+    macro_raw_rows  = _query_macro_raw(db, filter_val)
+    macro_proc_rows = _query_macro_processed(db, filter_val)
+    pillar_rows     = _query_pillars(db, filter_val)
+    scores_rows     = _query_scores(db, filter_val)
+    market_rows     = _query_market(db, filter_val)
 
     category_map = {
         "macro_raw":       macro_raw_rows,
@@ -172,7 +87,12 @@ def _filter_rows(rows: list[dict], filter_val: str | None) -> list[dict]:
     if not filter_val:
         return rows
     f = filter_val.upper()
-    return [r for r in rows if f in r["symbol"].upper() or f in r["description"].upper()]
+    return [
+        r for r in rows
+        if f in r["symbol"].upper()
+        or f in r["description"].upper()
+        or (r.get("formula") and f in r["formula"].upper())
+    ]
 
 
 def _query_macro_raw(db: Session, filter_val: str | None) -> list[dict]:
@@ -189,15 +109,16 @@ def _query_macro_raw(db: Session, filter_val: str | None) -> list[dict]:
         .all()
     }
 
+    macro_meta = get_indicator_meta(db)
     rows = []
-    for symbol, meta in MACRO_META.items():
+    for symbol, meta in macro_meta.items():
         r = agg.get(symbol)
         rows.append({
             "id": f"macro_raw:{symbol}",
             "symbol": symbol,
             "description": meta.get("description", ""),
             "formula": None,
-            "source": r.source if r else "FRED",
+            "source": r.source if r else meta.get("source", "FRED"),
             "frequency": meta.get("frequency", ""),
             "first_date": str(r.first_date) if r and r.first_date else None,
             "last_date": str(r.last_date) if r and r.last_date else None,
@@ -221,8 +142,9 @@ def _query_macro_processed(db: Session, filter_val: str | None) -> list[dict]:
         .all()
     }
 
+    processed_meta = get_processed_meta(db)
     rows = []
-    for symbol, meta in PROCESSED_META.items():
+    for symbol, meta in processed_meta.items():
         r = agg.get(symbol)
         rows.append({
             "id": f"macro_processed:{symbol}",
@@ -253,8 +175,9 @@ def _query_pillars(db: Session, filter_val: str | None) -> list[dict]:
         .all()
     }
 
+    pillar_meta = get_pillar_meta(db)
     rows = []
-    for pillar, meta in PILLAR_META.items():
+    for pillar, meta in pillar_meta.items():
         r = agg.get(pillar)
         rows.append({
             "id": f"pillar:{pillar}",
@@ -273,47 +196,46 @@ def _query_pillars(db: Session, filter_val: str | None) -> list[dict]:
 
 
 def _query_scores(db: Session, filter_val: str | None) -> list[dict]:
-    REQUIRED_PILLARS = set(MACRO_SCORE_WEIGHTS.keys())
+    score_weights = get_macro_score_weights(db)
+    score_meta = get_composite_score_meta(db)
+    required_pillars = set(score_weights.keys())
 
     all_rows = (
         db.query(MacroPillar.date, MacroPillar.pillar)
-        .filter(MacroPillar.pillar.in_(REQUIRED_PILLARS))
+        .filter(MacroPillar.pillar.in_(required_pillars))
         .all()
     )
 
+    empty_row = {
+        "id": "scores:MacroScore",
+        "symbol": "MacroScore",
+        "description": score_meta.get("description", ""),
+        "formula": score_meta.get("formula", ""),
+        "source": "internal",
+        "frequency": "MONTHLY",
+        "first_date": None,
+        "last_date": None,
+        "row_count": 0,
+        "data_category": "scores",
+    }
+
     if not all_rows:
-        return _filter_rows([{
-            "id": "scores:MacroScore", "symbol": "MacroScore",
-            "description": SCORES_META["MacroScore"]["description"],
-            "formula": SCORES_META["MacroScore"]["formula"],
-            "source": "internal", "frequency": "MONTHLY",
-            "first_date": None, "last_date": None, "row_count": 0,
-            "data_category": "scores",
-        }], filter_val)
+        return _filter_rows([empty_row], filter_val)
 
     df = pd.DataFrame(all_rows, columns=["date", "pillar"])
     complete_dates = (
         df.groupby("date")["pillar"]
         .apply(set)
-        .pipe(lambda s: s[s.apply(lambda p: p == REQUIRED_PILLARS)])
+        .pipe(lambda s: s[s.apply(lambda p: p == required_pillars)])
         .index.sort_values()
         .tolist()
     )
 
-    first_date = complete_dates[0] if complete_dates else None
-    last_date = complete_dates[-1] if complete_dates else None
-
     return _filter_rows([{
-        "id": "scores:MacroScore",
-        "symbol": "MacroScore",
-        "description": SCORES_META["MacroScore"]["description"],
-        "formula": SCORES_META["MacroScore"]["formula"],
-        "source": "internal",
-        "frequency": "MONTHLY",
-        "first_date": str(first_date) if first_date else None,
-        "last_date": str(last_date) if last_date else None,
+        **empty_row,
+        "first_date": str(complete_dates[0]) if complete_dates else None,
+        "last_date": str(complete_dates[-1]) if complete_dates else None,
         "row_count": len(complete_dates),
-        "data_category": "scores",
     }], filter_val)
 
 
@@ -331,15 +253,16 @@ def _query_market(db: Session, filter_val: str | None) -> list[dict]:
         .all()
     }
 
+    market_meta = get_market_symbol_meta(db)
     rows = []
-    for symbol, meta in MARKET_META.items():
+    for symbol, meta in market_meta.items():
         r = agg.get(symbol)
         rows.append({
             "id": f"market:{symbol}",
             "symbol": symbol,
             "description": meta.get("description", ""),
             "formula": None,
-            "source": r.source if r else "YAHOO",
+            "source": r.source if r else meta.get("source", "YAHOO"),
             "frequency": meta.get("frequency", ""),
             "first_date": str(r.first_date) if r and r.first_date else None,
             "last_date": str(r.last_date) if r and r.last_date else None,
@@ -366,11 +289,13 @@ def get_series(
 
     # macro score
     if symbol == "MacroScore":
-        REQUIRED_PILLARS = set(MACRO_SCORE_WEIGHTS.keys())
+        score_weights = get_macro_score_weights(db)
+        regime_thresholds = get_regime_thresholds(db)
+        required_pillars = set(score_weights.keys())
 
         q = (
             db.query(MacroPillar.date, MacroPillar.pillar, MacroPillar.score)
-            .filter(MacroPillar.pillar.in_(REQUIRED_PILLARS))
+            .filter(MacroPillar.pillar.in_(required_pillars))
         )
         if start_date:
             q = q.filter(MacroPillar.date >= start_date)
@@ -382,12 +307,10 @@ def get_series(
             raise HTTPException(status_code=404, detail="Nessun dato disponibile per MacroScore")
 
         df = pd.DataFrame(all_rows, columns=["date", "pillar", "score"])
-
-        # verifica che ogni data abbia esattamente i pillar richiesti
         complete_mask = (
             df.groupby("date")["pillar"]
             .apply(set)
-            .pipe(lambda s: s[s.apply(lambda p: p == REQUIRED_PILLARS)])
+            .pipe(lambda s: s[s.apply(lambda p: p == required_pillars)])
             .index
         )
         df = df[df["date"].isin(complete_mask)]
@@ -395,12 +318,9 @@ def get_series(
         if df.empty:
             raise HTTPException(status_code=404, detail="Nessuna data con tutti i pillar disponibili")
 
-        # pivot: date × pillar → score, calcola MacroScore e regime
         pivot = df.pivot(index="date", columns="pillar", values="score")
-        pivot["MacroScore"] = sum(
-            pivot[p] * w for p, w in MACRO_SCORE_WEIGHTS.items()
-        )
-        pivot["regime"] = pivot["MacroScore"].apply(_get_regime)
+        pivot["MacroScore"] = sum(pivot[p] * w for p, w in score_weights.items())
+        pivot["regime"] = pivot["MacroScore"].apply(lambda v: _get_regime(v, regime_thresholds))
         pivot = pivot.tail(LIMIT).reset_index()
 
         points = []
@@ -414,10 +334,10 @@ def get_series(
                 })
 
         dates = [p["date"] for p in points]
-
+        score_meta = get_composite_score_meta(db)
         return {
             "symbol": "MacroScore",
-            "description": "MacroScore composito (Growth, Inflation, Policy, Risk)",
+            "description": score_meta.get("description", ""),
             "source": "internal",
             "frequency": "MONTHLY",
             "first_date": str(dates[0]) if dates else None,
@@ -428,7 +348,8 @@ def get_series(
         }
 
     # macro processed
-    if symbol in PROCESSED_META:
+    processed_meta = get_processed_meta(db)
+    if symbol in processed_meta:
         agg = db.query(
             func.min(MacroProcessed.date), func.max(MacroProcessed.date), func.count(MacroProcessed.date)
         ).filter(MacroProcessed.indicator == symbol).first()
@@ -439,7 +360,7 @@ def get_series(
             if end_date:
                 q = q.filter(MacroProcessed.date <= end_date)
             rows = list(reversed(q.order_by(MacroProcessed.date.desc()).limit(LIMIT).all()))
-            meta = PROCESSED_META[symbol]
+            meta = processed_meta[symbol]
             return {
                 "symbol": symbol,
                 "description": meta.get("description", ""),
@@ -463,7 +384,8 @@ def get_series(
         if end_date:
             q = q.filter(MacroRaw.date <= end_date)
         rows = list(reversed(q.order_by(MacroRaw.date.desc()).limit(LIMIT).all()))
-        meta = MACRO_META.get(symbol, {})
+        macro_meta = get_indicator_meta(db)
+        meta = macro_meta.get(symbol, {})
         return {
             "symbol": symbol,
             "description": meta.get("description", ""),
@@ -487,7 +409,8 @@ def get_series(
         if end_date:
             q = q.filter(MarketPrice.date <= end_date)
         rows = list(reversed(q.order_by(MarketPrice.date.desc()).limit(LIMIT).all()))
-        meta = MARKET_META.get(symbol, {})
+        market_meta = get_market_symbol_meta(db)
+        meta = market_meta.get(symbol, {})
         return {
             "symbol": symbol,
             "description": meta.get("description", ""),
@@ -511,7 +434,8 @@ def get_series(
         if end_date:
             q = q.filter(MacroPillar.date <= end_date)
         rows = list(reversed(q.order_by(MacroPillar.date.desc()).limit(LIMIT).all()))
-        meta = PILLAR_META.get(symbol, {})
+        pillar_meta = get_pillar_meta(db)
+        meta = pillar_meta.get(symbol, {})
         return {
             "symbol": symbol,
             "description": meta.get("description", ""),

@@ -4,14 +4,8 @@ from sqlalchemy.orm import Session
 from typing import cast
 from app.db.macro_raw import MacroRaw
 from app.db.market_price import MarketPrice
-from app.services.ingest.market import ASSET_PROXIES
+from app.services.config_repo import get_asset_proxy_map
 
-ASSET_SERIES = {
-    "Equity": "SP500_REAL_RETURN",
-    "Bond": "BAMLCC0A0CMTRIV",
-    "Commodities": "PALLFNFINDEXQ",
-    "Cash": "DTB3",
-}
 
 def load_asset_returns(
     db: Session,
@@ -19,9 +13,9 @@ def load_asset_returns(
     end: date,
 ) -> dict[date, dict[str, float]]:
   out: dict[date, dict[str, float]] = {}
+  asset_proxy_map = get_asset_proxy_map(db)
 
-  for asset, cfg in ASSET_PROXIES.items():
-    symbol = cfg["symbol"]
+  for asset, symbol in asset_proxy_map.items():
     
     rows = (
       db.query(MarketPrice)
