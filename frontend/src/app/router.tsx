@@ -4,6 +4,8 @@ import AppLayout from "../layout/AppLayout";
 import Dashboard from "../pages/Dashboard";
 import Settings from "../pages/Settings";
 import Backtest from "../pages/Backtest";
+import BacktestDetail from "../pages/BacktestDetail";
+import BacktestRunDetail from "../pages/BacktestRunDetail";
 import Data from "../pages/Data";
 import DataDetail from "../pages/DataDetail";
 import LiveLong from "../pages/LiveLong";
@@ -36,6 +38,14 @@ const router = createBrowserRouter([
 			{
 				path: "analysis/backtest",
 				element: <Backtest />,
+			},
+			{
+				path: "analysis/backtest/:id",
+				element: <BacktestDetail />,
+			},
+			{
+				path: "analysis/backtest/:id/runs/:runId",
+				element: <BacktestRunDetail />,
 			},
 			{
 				path: "analysis/data",

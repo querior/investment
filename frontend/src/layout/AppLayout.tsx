@@ -14,17 +14,64 @@ import {
 	RiseOutlined,
 	DollarOutlined,
 } from "@ant-design/icons";
-import { useNavigate, Outlet } from "react-router-dom";
+import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { logout } from "../features/auth/reducer";
 
 const { Header, Sider, Content } = Layout;
 
+const LEAF_KEYS = [
+	"/",
+	"/analysis/data",
+	"/analysis/backtest",
+	"/live/long",
+	"/live/medium",
+	"/live/short",
+	"/settings",
+];
+
+function getSelectedKey(pathname: string): string {
+	return (
+		LEAF_KEYS.filter((k) => pathname === k || pathname.startsWith(k + "/"))
+			.sort((a, b) => b.length - a.length)[0] ?? "/"
+	);
+}
+
+function getPageTitle(pathname: string): string {
+	if (pathname === "/") return "Dashboard";
+	if (/^\/analysis\/backtest\/\d+\/runs\/\d+$/.test(pathname)) {
+		const parts = pathname.split("/");
+		return `Backtest #${parts[3]} — Run #${parts[5]}`;
+	}
+	if (/^\/analysis\/backtest\/\d+$/.test(pathname))
+		return `Backtest #${pathname.split("/").pop()}`;
+	if (pathname === "/analysis/backtest") return "Backtests";
+	if (/^\/analysis\/data\/.+$/.test(pathname))
+		return pathname.split("/").pop() ?? "Data";
+	if (pathname === "/analysis/data") return "Data";
+	if (pathname === "/live/long") return "Live — Long";
+	if (pathname === "/live/medium") return "Live — Medium";
+	if (pathname === "/live/short") return "Live — Short";
+	if (pathname === "/settings") return "Settings";
+	return "";
+}
+
 function AppLayout() {
 	const [collapsed, setCollapsed] = useState(false);
-	const navigate = useNavigate();
-	const dispatch = useDispatch();
 	const [isMobile, setIsMobile] = useState(false);
+	const navigate = useNavigate();
+	const location = useLocation();
+	const dispatch = useDispatch();
+
+	const selectedKey = useMemo(
+		() => getSelectedKey(location.pathname),
+		[location.pathname]
+	);
+
+	const pageTitle = useMemo(
+		() => getPageTitle(location.pathname),
+		[location.pathname]
+	);
 
 	const items = useMemo(
 		() => [
@@ -35,11 +82,7 @@ function AppLayout() {
 				label: "Analysis",
 				children: [
 					{ key: "/analysis/data", icon: <DatabaseOutlined />, label: "Data" },
-					{
-						key: "/analysis/backtest",
-						icon: <PlayCircleOutlined />,
-						label: "Backtest",
-					},
+					{ key: "/analysis/backtest", icon: <PlayCircleOutlined />, label: "Backtest" },
 				],
 			},
 			{
@@ -87,7 +130,8 @@ function AppLayout() {
 				<Menu
 					theme="dark"
 					mode="inline"
-					selectedKeys={[location.pathname]}
+					selectedKeys={[selectedKey]}
+					defaultOpenKeys={["/analysis", "/live"]}
 					items={items}
 					onClick={(e) => navigate(e.key)}
 				/>
@@ -103,10 +147,16 @@ function AppLayout() {
 							{collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
 						</button>
 						<div className="flex items-center gap-2">
-							<div className="w-7 h-7 rounded bg-gray-900 text-white flex items-center justify-center font-bold">
+							<div className="w-7 h-7 rounded bg-gray-900 text-white flex items-center justify-center font-bold text-xs">
 								QQ
 							</div>
-							<div className="font-semibold hidden sm:block">Querior Quant</div>
+							<span className="font-semibold hidden sm:block">Querior Quant</span>
+							{pageTitle && (
+								<>
+									<span className="text-gray-300 hidden sm:block">—</span>
+									<span className="text-gray-600 hidden sm:block">{pageTitle}</span>
+								</>
+							)}
 						</div>
 					</div>
 					<Dropdown menu={userMenu} placement="bottomRight" trigger={["click"]}>

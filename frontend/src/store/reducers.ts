@@ -2,12 +2,14 @@ import { combineReducers } from 'redux';
 import scenarios from '../features/scenario/reducer';
 import auth from '../features/auth/reducer';
 import data from '../features/data/reducer';
+import backtest from '../features/backtest/reducer';
 
 // ================|| COMBINE REDUCERS ||============================== //
 const reducers = combineReducers({
   scenarios,
   auth,
   data,
+  backtest,
 });
 
 export type RootState = ReturnType<typeof reducers>;

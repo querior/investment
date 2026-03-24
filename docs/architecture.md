@@ -51,6 +51,11 @@ backend/app/
 ├── scripts/
 │   └── seed_config.py  ← popola le tabelle di configurazione
 └── backtest/               ← trasversale a tutti i layer
+    ├── schemas/            ← Backtest, BacktestRun, BacktestWeight, BacktestPerformance
+    ├── runs.py             ← execute_backtest, run_in_background
+    ├── loaders.py          ← load_asset_returns (con resample EOM/EOW/EOD)
+    ├── metrics.py          ← compute_metrics (CAGR, Sharpe, Vol, MaxDD, WinRate, PF)
+    └── init_db.py          ← creazione tabelle + migrazione incrementale
 ```
 
 ## Config Layer

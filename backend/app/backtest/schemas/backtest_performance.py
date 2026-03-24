@@ -6,7 +6,7 @@ class BacktestPerformance(Base):
 
     run_id = Column(
         Integer,
-        ForeignKey("backtest_runs.id"),
+        ForeignKey("backtest_runs.id", ondelete="CASCADE"),
         primary_key=True,
     )
     date = Column(Date, primary_key=True)
