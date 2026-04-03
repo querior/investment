@@ -1,5 +1,9 @@
 import { call, put, takeLatest } from "redux-saga/effects";
-import { getCatalogApi, getSeriesForSymbolApi, ingestSeriesApi } from "../../services/data-service";
+import {
+	getCatalogApi,
+	getSeriesForSymbolApi,
+	ingestSeriesApi,
+} from "../../services/data-service";
 import {
 	fetchCatalogSuccess,
 	fetchCatalogFailure,
@@ -25,7 +29,7 @@ function* fetchCatalogEffect(
 				fetchCatalogSuccess({
 					items: [],
 					active_category: action.payload.data_category,
-					counters: { macro_raw: 0, macro_processed: 0, pillars: 0, scores: 0, market: 0 },
+					counters: { macro_raw: 0, macro_processed: 0, pillars: 0, market: 0 },
 				})
 			);
 		} else {

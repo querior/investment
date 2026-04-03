@@ -1,27 +1,27 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.db.macro_pillar import MacroPillar
 from app.db.deps import get_db
-from app.services.allocation.engine import compute_allocation_deltas
+from app.db.macro_regimes import MacroRegime
+from app.services.allocation.engine import compute_target_allocation
 
 router = APIRouter(tags=["allocation"])
 
 @router.get("/allocation")
 def get_allocation(date: str, db: Session = Depends(get_db)):
-  rows = (
-    db.query(MacroPillar)
-      .filter(MacroPillar.date == date)
-      .all()
-  )
-  
-  if not rows:
-    return {"error": "No pillar data for date"}
-  
-  pillars = {r.pillar: r.score for r in rows} # type: ignore
-  allocation_deltas = compute_allocation_deltas(db, pillars) # type: ignore
-  
-  return {
-    "date": date,
-    "pillars": pillars,
-    "allocation_deltas": allocation_deltas
-  }
+    rows = (
+        db.query(MacroRegime)
+        .filter(MacroRegime.date == date)
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Nessun dato di regime per {date}")
+
+    regimes = {r.pillar: r.regime for r in rows}
+    target = compute_target_allocation(db, regimes)
+
+    return {
+        "date": date,
+        "regimes": regimes,
+        "target_allocation": target,
+    }

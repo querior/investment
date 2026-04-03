@@ -1,7 +1,15 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
-export type DataCategory = "macro_raw" | "macro_processed" | "pillar" | "scores" | "market";
-export type CatalogCategory = "macro_raw" | "macro_processed" | "pillars" | "scores" | "market";
+export type DataCategory =
+	| "macro_raw"
+	| "macro_processed"
+	| "pillar"
+	| "market";
+export type CatalogCategory =
+	| "macro_raw"
+	| "macro_processed"
+	| "pillars"
+	| "market";
 
 export type SeriesEntry = {
 	id: string;
@@ -23,7 +31,6 @@ export type Catalog = {
 		macro_raw: number;
 		macro_processed: number;
 		pillars: number;
-		scores: number;
 		market: number;
 	};
 };
@@ -73,7 +80,6 @@ const initialState: DataState = {
 			macro_raw: 0,
 			macro_processed: 0,
 			pillars: 0,
-			scores: 0,
 			market: 0,
 		},
 	},

@@ -1,10 +1,10 @@
-from app.db.macro_pillar import MacroPillar
+from app.db.macro_regimes import MacroRegime
 
 def test_pillar_temporal_smoothness(db_session):
   rows = (
-      db_session.query(MacroPillar)
-      .filter(MacroPillar.pillar == "Growth")
-      .order_by(MacroPillar.date)
+      db_session.query(MacroRegime)
+      .filter(MacroRegime.pillar == "Growth")
+      .order_by(MacroRegime.date)
       .all()
   )
 

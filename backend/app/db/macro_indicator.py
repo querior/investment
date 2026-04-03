@@ -1,5 +1,6 @@
 import enum
-from sqlalchemy import Column, Integer, String, Boolean, Enum as SAEnum
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import String, Boolean, Enum as SAEnum
 from app.db.session import Base
 
 
@@ -17,9 +18,9 @@ class IndicatorFrequency(str, enum.Enum):
 class MacroIndicator(Base):
     __tablename__ = "macro_indicators"
 
-    id = Column(Integer, primary_key=True)
-    ticker = Column(String, unique=True, nullable=False)
-    source = Column(SAEnum(IndicatorSource, name="indicator_source"), nullable=False)
-    description = Column(String, nullable=False)
-    frequency = Column(SAEnum(IndicatorFrequency, name="indicator_frequency"), nullable=False)
-    is_active = Column(Boolean, nullable=False, default=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    source: Mapped[IndicatorSource] = mapped_column(SAEnum(IndicatorSource, name="indicator_source"), nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    frequency: Mapped[IndicatorFrequency] = mapped_column(SAEnum(IndicatorFrequency, name="indicator_frequency"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

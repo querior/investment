@@ -1,43 +1,41 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import date
-from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
-from app.services.pillars.service import compute_pillars
-from app.db.macro_pillar import MacroPillar
+from app.db.macro_regimes import MacroRegime
 
 router = APIRouter(tags=["pillar"])
 
 def get_db():
-  db = SessionLocal()
-  try:
-    yield db
-  finally:
-    db.close()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @router.get("/pillars")
 def get_pillars(
-  start: date | None = None,
-  end: date | None = None,
-  db: Session = Depends(get_db)
+    start: date | None = None,
+    end: date | None = None,
+    db: Session = Depends(get_db)
 ):
-  # calcolo lazy (idempotente)
-  compute_pillars(db, start, end)
-  
-  q = db.query(MacroPillar)
-  if start:
-    q = q.filter(MacroPillar.date >= start)
-    
-  if end:
-    q = q.filter(MacroPillar.date <= end)
-    
-  rows = q.order_by(MacroPillar.date, MacroPillar.pillar).all()
-  
-  return [
-    {
-      "date": r.date,
-      "pillar": r.pillar,
-      "score": r.score
-    }
-    for r in rows
-  ]
+    q = db.query(MacroRegime)
+    if start:
+        q = q.filter(MacroRegime.date >= start)
+    if end:
+        q = q.filter(MacroRegime.date <= end)
+
+    rows = q.order_by(MacroRegime.date, MacroRegime.pillar).all()
+
+    return [
+        {
+            "date": r.date,
+            "pillar": r.pillar,
+            "score": r.score,
+            "score_ema": r.score_ema,
+            "regime": r.regime,
+            "counter": r.counter,
+            "pending": r.pending,
+        }
+        for r in rows
+    ]

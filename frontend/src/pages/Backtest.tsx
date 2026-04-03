@@ -18,7 +18,6 @@ type CreateFormValues = {
 	name: string;
 	description?: string;
 	frequency: string;
-	primary_index: string;
 };
 
 type EditFormValues = {
@@ -59,7 +58,6 @@ export default function Backtest() {
 			name: values.name,
 			description: values.description,
 			frequency: values.frequency,
-			primary_index: values.primary_index,
 		}));
 	};
 
@@ -85,7 +83,6 @@ export default function Backtest() {
 			render: (v: string | null) => v ?? "—",
 		},
 		{ title: "Frequency", dataIndex: "frequency", key: "frequency" },
-		{ title: "Primary index", dataIndex: "primary_index", key: "primary_index" },
 		{ title: "Version", dataIndex: "strategy_version", key: "strategy_version" },
 		{
 			title: "Created at",
@@ -168,25 +165,20 @@ export default function Backtest() {
 				confirmLoading={creating}
 				destroyOnHidden
 			>
-				<Form form={createForm} layout="vertical" className="mt-4" initialValues={{ frequency: "EOM", primary_index: "MacroScore" }}>
+				<Form form={createForm} layout="vertical" className="mt-4" initialValues={{ frequency: "EOM" }}>
 					<Form.Item name="name" label="Name" rules={[{ required: true, message: "Enter a name" }]}>
 						<Input placeholder="e.g. Macro Allocation" />
 					</Form.Item>
 					<Form.Item name="description" label="Description">
 						<Input.TextArea rows={2} placeholder="(optional)" />
 					</Form.Item>
-					<div className="grid grid-cols-2 gap-4">
-						<Form.Item name="frequency" label="Frequency" rules={[{ required: true }]}>
-							<Select options={[
+					<Form.Item name="frequency" label="Frequency" rules={[{ required: true }]}>
+						<Select options={[
 							{ value: "EOM", label: "End of Month (EOM)" },
 							{ value: "EOW", label: "End of Week (EOW)" },
 							{ value: "EOD", label: "End of Day (EOD)" },
 						]} />
-						</Form.Item>
-						<Form.Item name="primary_index" label="Primary index" rules={[{ required: true }]}>
-							<Select options={[{ value: "MacroScore", label: "MacroScore" }]} />
-						</Form.Item>
-					</div>
+					</Form.Item>
 				</Form>
 			</Modal>
 

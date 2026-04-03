@@ -5,12 +5,14 @@ from app.backtest.schemas.backtest import Backtest
 from app.backtest.schemas.backtest_run import BacktestRun
 from app.backtest.schemas.backtest_weight import BacktestWeight
 from app.backtest.schemas.backtest_performance import BacktestPerformance
+from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
 
 _TABLES = [
     Backtest.__table__,
     BacktestRun.__table__,
     BacktestWeight.__table__,
     BacktestPerformance.__table__,
+    BacktestRunParameter.__table__,
 ]
 
 
@@ -29,18 +31,22 @@ def init_backtest_db(reset: bool = False) -> None:
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE backtests
-                ADD COLUMN IF NOT EXISTS frequency     VARCHAR DEFAULT 'EOM',
-                ADD COLUMN IF NOT EXISTS primary_index VARCHAR DEFAULT 'MacroScore';
+                ADD COLUMN IF NOT EXISTS frequency     VARCHAR DEFAULT 'EOM';
             ALTER TABLE backtest_runs
                 ADD COLUMN IF NOT EXISTS frequency        VARCHAR DEFAULT 'EOM',
-                ADD COLUMN IF NOT EXISTS primary_index    VARCHAR DEFAULT 'MacroScore',
                 ADD COLUMN IF NOT EXISTS config_snapshot  VARCHAR,
                 ADD COLUMN IF NOT EXISTS win_rate         FLOAT,
                 ADD COLUMN IF NOT EXISTS profit_factor    FLOAT,
                 ADD COLUMN IF NOT EXISTS n_trades         INTEGER;
             ALTER TABLE backtest_weights
-                ADD COLUMN IF NOT EXISTS macro_score   FLOAT,
                 ADD COLUMN IF NOT EXISTS pillar_scores VARCHAR;
+            CREATE TABLE IF NOT EXISTS backtest_run_parameters (
+                id     SERIAL PRIMARY KEY,
+                run_id INTEGER NOT NULL REFERENCES backtest_runs(id) ON DELETE CASCADE,
+                key    VARCHAR NOT NULL,
+                value  VARCHAR NOT NULL,
+                UNIQUE (run_id, key)
+            );
             -- Ricrea FK con ON DELETE CASCADE se non già presente
             DO $$
             BEGIN

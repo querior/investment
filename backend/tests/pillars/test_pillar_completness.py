@@ -1,5 +1,5 @@
 from app.db.macro_processed import MacroProcessed
-from app.db.macro_pillar import MacroPillar
+from app.db.macro_regimes import MacroRegime
 from datetime import date
 from app.services.pillars.service import compute_pillars
 
@@ -13,6 +13,6 @@ def test_pillar_requires_all_indicators(db_session, clean_db):
   db_session.commit()
   
   compute_pillars(db_session)
-  rows = (db_session.query(MacroPillar).all())
+  rows = (db_session.query(MacroRegime).all())
   
   assert len(rows) == 0

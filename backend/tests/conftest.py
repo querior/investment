@@ -41,7 +41,7 @@ def clean_db(engine):
     with engine.begin() as conn:
         conn.execute(text("TRUNCATE TABLE macro_raw CASCADE"))
         conn.execute(text("TRUNCATE TABLE macro_processed CASCADE"))
-        conn.execute(text("TRUNCATE TABLE macro_pillars CASCADE"))
+        conn.execute(text("TRUNCATE TABLE macro_regimes CASCADE"))
         
         
 @pytest.fixture

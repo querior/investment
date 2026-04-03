@@ -44,7 +44,9 @@ const buildColumns = (
 			<div>
 				<div>{record.description}</div>
 				{record.formula && (
-					<div className="text-xs text-gray-400 font-mono mt-0.5">{record.formula}</div>
+					<div className="text-xs text-gray-400 font-mono mt-0.5">
+						{record.formula}
+					</div>
 				)}
 			</div>
 		),
@@ -193,7 +195,6 @@ export default function Data() {
 			label: `Macro Processed (${catalog.counters.macro_processed})`,
 		},
 		{ key: "pillars", label: `Pillars (${catalog.counters.pillars})` },
-		{ key: "scores", label: `Scores (${catalog.counters.scores})` },
 		{ key: "market", label: `Market (${catalog.counters.market})` },
 	];
 
@@ -254,7 +255,7 @@ export default function Data() {
 										</li>
 									</ol>
 									<p className="text-gray-500 text-xs">
-										Le prime 60 osservazioni vengono scartate (warm-up della
+										Le prime 36 osservazioni vengono scartate (warm-up della
 										rolling window).
 									</p>
 								</div>

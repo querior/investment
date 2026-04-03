@@ -8,18 +8,19 @@ export type BacktestDto = {
 	description: string | null;
 	strategy_version: string;
 	frequency: string;
-	primary_index: string;
 	created_at: string;
 	updated_at: string;
 };
 
+export type InitialAllocation = "target" | "neutral";
+
 export type BacktestRunDto = {
 	id: number;
 	backtest_id: number;
+	name: string | null;
 	start_date: string;
 	end_date: string;
 	frequency: string;
-	primary_index: string;
 	config_snapshot: string | null; // JSON
 	status: BacktestStatus;
 	notes: string | null;
@@ -33,6 +34,7 @@ export type BacktestRunDto = {
 	n_trades: number | null;
 	created_at: string;
 	updated_at: string;
+	parameters: Record<string, string>;
 };
 
 export type BacktestListResponse = {
@@ -47,26 +49,44 @@ export type CreateBacktestPayload = {
 	description?: string;
 	strategy_version?: string;
 	frequency?: string;
-	primary_index?: string;
 };
 
 export type CreateRunPayload = {
+	name?: string;
 	start: string;
 	end: string;
 	notes?: string;
+	initial_allocation?: InitialAllocation;
 };
 
-export type AllocationConfig = {
-	sensitivity: Record<string, Record<string, number>>;
+export type AdjustmentDto = {
+	pillar: string;
+	regime: string;
+	asset: string;
+	delta: number;
+};
+
+export type BacktestConfigDto = {
 	neutral: Record<string, number>;
-	scale_k: number;
-	max_abs_delta: number;
-	macro_score_weights: Record<string, number>;
+	coherence_factor: number;
+	allocation_alpha: number;
+	adjustments: AdjustmentDto[];
 };
 
-export const getAllocationConfigApi = async (): Promise<AllocationConfig> => {
-	const res = await api.get('/allocation-config');
+// Alias used in BacktestRunDetail
+export type AllocationConfig = BacktestConfigDto;
+
+export const getBacktestConfigApi = async (backtestId: number): Promise<BacktestConfigDto> => {
+	const res = await api.get(`/backtests/${backtestId}/config`);
 	return res.data;
+};
+
+export const patchAllocationParameterApi = async (key: string, value: number): Promise<void> => {
+	await api.patch(`/allocation-config/parameters/${key}`, { value });
+};
+
+export const invalidateRunApi = async (backtestId: number, runId: number): Promise<void> => {
+	await api.post(`/backtests/${backtestId}/runs/${runId}/invalidate`);
 };
 
 // Backtests (container)
@@ -121,6 +141,15 @@ export const getRunApi = async (backtestId: number, runId: number): Promise<Back
 	return res.data;
 };
 
+export const updateRunApi = async (backtestId: number, runId: number, payload: { name?: string; start?: string; end?: string; parameters?: Record<string, string> }): Promise<void> => {
+	await api.patch(`/backtests/${backtestId}/runs/${runId}`, payload);
+};
+
+export const cloneRunApi = async (backtestId: number, runId: number): Promise<BacktestRunDto> => {
+	const res = await api.post(`/backtests/${backtestId}/runs/${runId}/clone`);
+	return res.data;
+};
+
 export const getRunNavApi = async (backtestId: number, runId: number): Promise<{ date: string; nav: number; monthly_return: number }[]> => {
 	const res = await api.get(`/backtests/${backtestId}/runs/${runId}/nav`);
 	return res.data;
@@ -130,8 +159,7 @@ export type RunWeightDto = {
 	date: string;
 	asset: string;
 	weight: number;
-	macro_score: number | null;
-	pillar_scores: string | null; // JSON string: {"Growth": 0.45, ...}
+	pillar_scores: string | null; // JSON string: {"Growth": "expansion", ...}
 };
 
 export const getRunWeightsApi = async (backtestId: number, runId: number): Promise<RunWeightDto[]> => {

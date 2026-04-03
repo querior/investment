@@ -10,5 +10,4 @@ class BacktestWeight(Base):
     asset = Column(String, primary_key=True)
 
     weight = Column(Float, nullable=False)
-    macro_score = Column(Float, nullable=True)
-    pillar_scores = Column(String, nullable=True)  # JSON: {"Growth": 0.45, ...}
+    pillar_scores = Column(String, nullable=True)  # JSON: {"Growth": "expansion", ...}

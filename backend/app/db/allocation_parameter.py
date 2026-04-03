@@ -1,11 +1,12 @@
-from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Integer, String, Float
 from app.db.session import Base
 
 
 class AllocationParameter(Base):
     __tablename__ = "allocation_parameters"
 
-    id = Column(Integer, primary_key=True)
-    key = Column(String, unique=True, nullable=False)
-    value = Column(Float, nullable=False)
-    description = Column(String, nullable=False)
+    id          : Mapped[int]   = mapped_column(Integer, primary_key=True)
+    key         : Mapped[str]   = mapped_column(String, unique=True)
+    value       : Mapped[float] = mapped_column(Float)
+    description : Mapped[str]   = mapped_column(String)

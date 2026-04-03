@@ -22,11 +22,11 @@ class BacktestRun(Base):
 
     id = Column(Integer, primary_key=True)
     backtest_id = Column(Integer, ForeignKey("backtests.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=True)
 
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
     frequency = Column(Enum(BacktestFrequency, native_enum=False), nullable=False, default=BacktestFrequency.EOM)
-    primary_index = Column(String, nullable=False, default="MacroScore")
     config_snapshot = Column(String, nullable=True)  # JSON: matrice sensitività + neutral + params
     status = Column(Enum(BacktestStatus, native_enum=False), nullable=False, default=BacktestStatus.READY)
     stop_requested = Column(Boolean, nullable=False, default=False)

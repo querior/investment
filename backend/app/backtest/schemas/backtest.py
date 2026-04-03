@@ -11,7 +11,6 @@ class Backtest(Base):
     description = Column(String, nullable=True)
     strategy_version = Column(String, nullable=False, default="v1")
     frequency = Column(Enum(BacktestFrequency, native_enum=False), nullable=False, default=BacktestFrequency.EOM)
-    primary_index = Column(String, nullable=False, default="MacroScore")
 
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)

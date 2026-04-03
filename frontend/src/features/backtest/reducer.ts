@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import type { BacktestDto, BacktestRunDto, CreateBacktestPayload, CreateRunPayload, RunWeightDto } from "../../services/backtest-service";
+import type { BacktestConfigDto, BacktestDto, BacktestRunDto, CreateBacktestPayload, CreateRunPayload, RunWeightDto } from "../../services/backtest-service";
 
 export type BacktestState = {
 	// list
@@ -21,11 +21,15 @@ export type BacktestState = {
 	// create/execute run
 	creatingRun: boolean;
 	executingRunId: number | null;
+	invalidatingRunId: number | null;
 	// run detail
 	currentRun: BacktestRunDto | null;
 	currentRunLoading: boolean;
 	runWeights: RunWeightDto[];
 	runWeightsLoading: boolean;
+	// backtest config
+	backtestConfig: BacktestConfigDto | null;
+	backtestConfigLoading: boolean;
 };
 
 const initialState: BacktestState = {
@@ -43,10 +47,13 @@ const initialState: BacktestState = {
 	runsLoading: false,
 	creatingRun: false,
 	executingRunId: null,
+	invalidatingRunId: null,
 	currentRun: null,
 	currentRunLoading: false,
 	runWeights: [],
 	runWeightsLoading: false,
+	backtestConfig: null,
+	backtestConfigLoading: false,
 };
 
 const slice = createSlice({
@@ -135,6 +142,20 @@ const slice = createSlice({
 			state.creatingRun = false;
 			state.error = action.payload;
 		},
+		// --- update run ---
+		updateRunRequest(_state, _action: PayloadAction<{ backtestId: number; runId: number; patch: { name?: string; start?: string; end?: string; parameters?: Record<string, string> } }>) {},
+		updateRunSuccess(state, action: PayloadAction<{ runId: number; patch: { name?: string; start?: string; end?: string; parameters?: Record<string, string> } }>) {
+			const { name, start, end, parameters } = action.payload.patch;
+			const applyTo = (run: BacktestRunDto) => {
+				if (name !== undefined) run.name = name;
+				if (start !== undefined) run.start_date = start;
+				if (end !== undefined) run.end_date = end;
+				if (parameters !== undefined) run.parameters = { ...run.parameters, ...parameters };
+			};
+			const run = state.runs.find((r) => r.id === action.payload.runId);
+			if (run) applyTo(run);
+			if (state.currentRun?.id === action.payload.runId) applyTo(state.currentRun);
+		},
 		// --- delete run ---
 		deleteRunRequest(_state, _action: PayloadAction<{ backtestId: number; runId: number }>) {},
 		deleteRunSuccess(state, action: PayloadAction<number>) {
@@ -166,6 +187,17 @@ const slice = createSlice({
 		fetchRunWeightsFailure(state, action: PayloadAction<string>) {
 			state.runWeightsLoading = false;
 		},
+		// --- backtest config ---
+		fetchBacktestConfigRequest(state, _action: PayloadAction<number>) {
+			state.backtestConfigLoading = true;
+		},
+		fetchBacktestConfigSuccess(state, action: PayloadAction<BacktestConfigDto>) {
+			state.backtestConfigLoading = false;
+			state.backtestConfig = action.payload;
+		},
+		fetchBacktestConfigFailure(state) {
+			state.backtestConfigLoading = false;
+		},
 		// --- execute run ---
 		executeRunRequest(state, action: PayloadAction<{ backtestId: number; runId: number }>) {
 			state.executingRunId = action.payload.runId;
@@ -185,6 +217,32 @@ const slice = createSlice({
 		},
 		stopRunSuccess(_state, _action: PayloadAction<void>) {},
 		stopRunFailure(_state, _action: PayloadAction<void>) {},
+		// --- invalidate run ---
+		invalidateRunRequest(state, action: PayloadAction<{ backtestId: number; runId: number }>) {
+			state.invalidatingRunId = action.payload.runId;
+		},
+		invalidateRunSuccess(state, action: PayloadAction<number>) {
+			state.invalidatingRunId = null;
+			const reset = (run: BacktestRunDto) => {
+				run.status = "READY";
+				run.cagr = null;
+				run.sharpe = null;
+				run.volatility = null;
+				run.max_drawdown = null;
+				run.win_rate = null;
+				run.profit_factor = null;
+				run.n_trades = null;
+			};
+			const run = state.runs.find((r) => r.id === action.payload);
+			if (run) reset(run);
+			if (state.currentRun?.id === action.payload) {
+				reset(state.currentRun);
+				state.runWeights = [];
+			}
+		},
+		invalidateRunFailure(state) {
+			state.invalidatingRunId = null;
+		},
 	},
 });
 
@@ -211,6 +269,8 @@ export const {
 	createRunRequest,
 	createRunSuccess,
 	createRunFailure,
+	updateRunRequest,
+	updateRunSuccess,
 	deleteRunRequest,
 	deleteRunSuccess,
 	deleteRunFailure,
@@ -220,12 +280,18 @@ export const {
 	stopRunRequest,
 	stopRunSuccess,
 	stopRunFailure,
+	invalidateRunRequest,
+	invalidateRunSuccess,
+	invalidateRunFailure,
 	fetchRunDetailRequest,
 	fetchRunDetailSuccess,
 	fetchRunDetailFailure,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
 	fetchRunWeightsFailure,
+	fetchBacktestConfigRequest,
+	fetchBacktestConfigSuccess,
+	fetchBacktestConfigFailure,
 } = slice.actions;
 
 export default slice.reducer;

@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Literal
 import os
 from fredapi import Fred
 from app.db.deps import get_db
+from app.db.macro_processed import MacroProcessed
+from app.db.macro_regimes import MacroRegime
 from app.services.ingest.bootstrap_macro import ingest_all_macro
 from app.services.ingest.fred import ingest_fred_series_delta, ingest_fred_series_full
 from app.services.ingest.market import ingest_market_delta, ingest_market_full
@@ -12,26 +15,8 @@ from app.services.processed.service import process_indicator
 from app.services.pillars.service import compute_pillars
 from app.services.config_repo import get_fred_tickers, get_market_symbols, get_processed_map, get_pillars
 
+
 router = APIRouter(tags=["ingest"])
-
-
-def _compute_pillar(db: Session, pillar: str) -> int:
-    """Ricalcola process_indicator per tutti gli indicatori del pillar, poi compute_pillars."""
-    pillars = get_pillars(db)
-    target_to_process = {
-        tgt: (src, tgt, tf, resample, window, clip)
-        for src, tgt, tf, resample, window, clip in get_processed_map(db)
-    }
-    for indicator in pillars.get(pillar, []):
-        if indicator in target_to_process:
-            src, tgt, tf, resample, window, clip = target_to_process[indicator]
-            process_indicator(db, src, tgt, tf, resample=resample, window=window, clip_limit=clip)
-    compute_pillars(db)
-    from sqlalchemy import func
-    from app.db.macro_pillar import MacroPillar
-    count = db.query(func.count(MacroPillar.date)).filter(MacroPillar.pillar == pillar).scalar()
-    return count or 0
-
 
 class IngestSeriesRequest(BaseModel):
     symbol: str
@@ -56,34 +41,21 @@ def ingest_series(
     market_symbols = {sym for sym, _ in get_market_symbols(db)}
     fred_tickers = get_fred_tickers(db)
 
-    # MacroScore — ricalcola tutta la pipeline
-    if symbol == "MacroScore":
-        for src, tgt, tf, resample, window, clip in processed_map:
-            process_indicator(db, src, tgt, tf, resample=resample, window=window, clip_limit=clip)
-        compute_pillars(db)
-        return {
-            "symbol": symbol,
-            "mode": "computed",
-            "inserted": None,
-            "detail": f"Pipeline completa: {len(processed_map)} indicatori processati, pillar scores ricalcolati",
-        }
-
     # Pillar — ricalcola gli indicatori del pillar specifico
     if symbol in pillars:
-        inserted = _compute_pillar(db, symbol)
+        compute_pillars(db, pillar=symbol)
+        count = db.query(func.count(MacroRegime.date)).filter(MacroRegime.pillar == symbol).scalar() or 0
         return {
             "symbol": symbol,
             "mode": "computed",
-            "inserted": inserted,
-            "detail": f"Pillar {symbol}: {len(pillars[symbol])} indicatori processati, {inserted} score calcolati",
+            "inserted": count,
+            "detail": f"Pillar {symbol}: {count} regime records calcolati",
         }
 
     # Macro processed — ricalcola process_indicator per il target specifico
     if symbol in target_to_process:
         src, tgt, tf, resample, window, clip = target_to_process[symbol]
         process_indicator(db, src, tgt, tf, resample=resample, window=window, clip_limit=clip)
-        from sqlalchemy import func
-        from app.db.macro_processed import MacroProcessed
         count = db.query(func.count(MacroProcessed.date)).filter(MacroProcessed.indicator == tgt).scalar() or 0
         return {
             "symbol": symbol,

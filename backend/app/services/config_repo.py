@@ -8,11 +8,7 @@ from app.db.market_symbol import MarketSymbol
 from app.db.processed_indicator import ProcessedIndicator
 from app.db.pillar import Pillar
 from app.db.pillar_component import PillarComponent
-from app.db.composite_score import CompositeScore
-from app.db.composite_score_weight import CompositeScoreWeight
-from app.db.regime_threshold import RegimeThreshold
 from app.db.asset_class import AssetClass
-from app.db.sensitivity_coefficient import SensitivityCoefficient
 from app.db.allocation_parameter import AllocationParameter
 
 
@@ -52,9 +48,9 @@ def get_processed_map(db: Session) -> list[tuple[str, str, str, str | None, int,
     ]
 
 
-def get_pillars(db: Session) -> dict[str, list[str]]:
+def get_pillars(db: Session) -> dict[str, list[tuple[str, bool]]]:
     """
-    Dict {pillar_name: [output_names]} per tutti i pillar attivi,
+    Dict {pillar_name: [(output_name, invert), ...]} per tutti i pillar attivi,
     ordinati per display_order.
     """
     pillars = (
@@ -63,7 +59,7 @@ def get_pillars(db: Session) -> dict[str, list[str]]:
         .order_by(Pillar.display_order)
         .all()
     )
-    result: dict[str, list[str]] = {}
+    result: dict[str, list[tuple[str, bool]]] = {}
     for pillar in pillars:
         components = (
             db.query(PillarComponent, ProcessedIndicator)
@@ -73,39 +69,11 @@ def get_pillars(db: Session) -> dict[str, list[str]]:
             .order_by(PillarComponent.display_order)
             .all()
         )
-        result[pillar.name] = [proc.output_name for _, proc in components]
+        result[pillar.name] = [
+            (proc.output_name, proc.invert)
+            for _, proc in components
+        ]
     return result
-
-
-def get_macro_score_weights(db: Session, score_name: str = "MacroScore") -> dict[str, float]:
-    """Dict {pillar_name: weight} per lo score indicato."""
-    score = db.query(CompositeScore).filter(CompositeScore.name == score_name).one_or_none()
-    if not score:
-        return {}
-    rows = (
-        db.query(CompositeScoreWeight, Pillar)
-        .join(Pillar, CompositeScoreWeight.pillar_id == Pillar.id)
-        .filter(CompositeScoreWeight.composite_score_id == score.id)
-        .all()
-    )
-    return {pillar.name: w.weight for w, pillar in rows}
-
-
-def get_regime_thresholds(db: Session, score_name: str = "MacroScore") -> list[tuple[float | None, str]]:
-    """
-    Lista di (threshold_min, nome_regime) ordinata per display_order.
-    threshold_min=None indica il regime senza lower bound (il più basso).
-    """
-    score = db.query(CompositeScore).filter(CompositeScore.name == score_name).one_or_none()
-    if not score:
-        return []
-    rows = (
-        db.query(RegimeThreshold)
-        .filter(RegimeThreshold.composite_score_id == score.id)
-        .order_by(RegimeThreshold.display_order)
-        .all()
-    )
-    return [(r.threshold_min, r.name) for r in rows]
 
 
 def get_neutral_allocation(db: Session) -> dict[str, float]:
@@ -117,20 +85,6 @@ def get_neutral_allocation(db: Session) -> dict[str, float]:
 def get_asset_classes(db: Session) -> list[AssetClass]:
     """Lista di AssetClass ordinata per display_order."""
     return db.query(AssetClass).order_by(AssetClass.display_order).all()
-
-
-def get_sensitivity(db: Session) -> dict[str, dict[str, float]]:
-    """Dict {pillar_name: {asset_name: coefficient}}."""
-    rows = (
-        db.query(SensitivityCoefficient, Pillar, AssetClass)
-        .join(Pillar, SensitivityCoefficient.pillar_id == Pillar.id)
-        .join(AssetClass, SensitivityCoefficient.asset_class_id == AssetClass.id)
-        .all()
-    )
-    result: dict[str, dict[str, float]] = {}
-    for coeff, pillar, asset in rows:
-        result.setdefault(pillar.name, {})[asset.name] = coeff.coefficient
-    return result
 
 
 def get_allocation_parameter(db: Session, key: str, default: float) -> float:
@@ -150,9 +104,9 @@ _TRANSFORM_LABEL: dict[str, str] = {
 }
 
 _TRANSFORM_FORMULA: dict[str, str] = {
-    "YOY":   "(xₜ / xₜ₋₁₂ − 1) × 100  →  z = (x − μ₆₀) / σ₆₀, clip ±3",
-    "LEVEL": "xₜ − xₜ₋₁  →  z = (x − μ₆₀) / σ₆₀, clip ±3",
-    "DELTA": "xₜ − xₜ₋₁  →  z = (x − μ₆₀) / σ₆₀, clip ±3",
+    "YOY":   "(xₜ / xₜ₋₁₂ − 1) × 100  →  z = (x − μ₆₀) / σ₆₀, clip ±2",
+    "LEVEL": "xₜ − xₜ₋₁  →  z = (x − μ₆₀) / σ₆₀, clip ±2",
+    "DELTA": "xₜ − xₜ₋₁  →  z = (x − μ₆₀) / σ₆₀, clip ±2",
 }
 
 
@@ -224,24 +178,6 @@ def get_pillar_meta(db: Session) -> dict[str, dict]:
             "frequency": "MONTHLY",
         }
     return result
-
-
-def get_composite_score_meta(db: Session, score_name: str = "MacroScore") -> dict:
-    """Meta (description, formula, frequency) per un composite score."""
-    score = db.query(CompositeScore).filter(CompositeScore.name == score_name).one_or_none()
-    if not score:
-        return {}
-    weights = get_macro_score_weights(db, score_name)
-    parts = []
-    for pillar, w in weights.items():
-        sign = "+" if w >= 0 else "−"
-        parts.append(f"{sign} {abs(w)}·{pillar}")
-    formula = " ".join(parts).lstrip("+ ").strip()
-    return {
-        "description": score.description,
-        "formula": formula,
-        "frequency": "MONTHLY",
-    }
 
 
 def get_asset_proxy_map(db: Session) -> dict[str, str]:

@@ -88,6 +88,64 @@ Le metriche vengono ricalcolate e committate **ad ogni ciclo** durante l'esecuzi
 | `backtest_weights` | Allocazione per data e asset class (con macro_score, pillar_scores) |
 | `backtest_performance` | NAV e ritorno mensile per ogni ciclo |
 
+## Ottimizzazione della responsività mensile
+
+Le due leve del sistema — MacroScore e matrice di sensitività — oggi non dialogano tra loro. Di seguito le direzioni per aumentare la responsività ai cambiamenti mensili, ordinate per impatto/complessità.
+
+### Dove si perde responsività oggi
+
+- **Saturazione aggressiva** — `f(s) = clamp(s/2, -1, 1)` appiattisce il segnale oltre ±2σ: variazioni ai margini (es. Growth da +1.8 a +2.5) non producono nessun delta aggiuntivo
+- **K fisso al 5%** — indipendente dalla velocità di cambiamento del MacroScore; un mese di swing +0.4 e uno di +0.05 producono lo stesso tilt
+- **Matrice calibrata a intuizione** — i coefficienti non sono stimati sui dati; la relazione reale tra pillar score e rendimento degli asset è empirica
+- **Zero-sum centering incondizionato** — in certi regimi (es. Risk estremo) sarebbe corretto concentrare tutto su Cash senza bilanciare con altri asset
+
+### Leve di ottimizzazione
+
+| Leva | Impatto | Complessità | Rischio overfitting |
+|------|---------|-------------|---------------------|
+| Momentum dei pillar | Alto | Bassa | Basso |
+| K dinamico sul ΔMacroScore | Medio-alto | Bassa | Basso |
+| Saturazione asimmetrica | Medio | Bassa | Basso |
+| Calibrazione empirica della matrice | Alto | Media | **Alto** |
+| Parametri condizionati al regime | Alto | Alta | Medio |
+
+#### 1. Momentum dei pillar
+Usare non solo il livello `s` ma anche la variazione `Δs = s_t − s_{t-1}`:
+```
+segnale = α × livello + β × momentum
+```
+Un pillar in trend ha più peso di uno stabile allo stesso livello. Alto impatto sulla responsività, basso rischio.
+
+#### 2. K dinamico
+```
+K_t = K_base × (1 + γ × |ΔMacroScore|)
+```
+Rebalancing conservativo quando il MacroScore è stabile, risposta amplificata quando cambia molto.
+
+#### 3. Saturazione asimmetrica
+Reagire più velocemente al deterioramento (risk-off) che al miglioramento (risk-on):
+```
+f(s) = s / 1.5  se s < 0   (più sensibile al ribasso)
+f(s) = s / 2.5  se s > 0   (più cauto al rialzo)
+```
+Razionale: le perdite arrivano veloci, i recuperi lenti.
+
+#### 4. Calibrazione empirica della matrice
+Stimare i coefficienti di sensitività come regressione dei ritorni mensili degli asset sui pillar score storici (OLS, ridge o LASSO per regularizzazione). Richiede un modulo separato di ottimizzazione che scrive i risultati nella tabella `sensitivity_coefficients`. Vedi sezione Calibrazione in `docs/layer-long.md`.
+
+#### 5. Parametri condizionati al regime
+Matrici diverse per i quattro regimi (espansione, ripresa, rallentamento, recessione). In recessione coefficienti più forti su Cash/Bond; in espansione su Equity/Commodities.
+
+### Domanda aperta: target di ottimizzazione
+Prima di calibrare, definire l'obiettivo:
+- **Massimizzare Sharpe** → privilegia momentum e K dinamico
+- **Minimizzare drawdown** → privilegia saturazione asimmetrica e parametri per regime
+- **Massimizzare CAGR a drawdown vincolato** → calibrazione empirica della matrice
+
+Il backtest EOM è lo strumento di verifica: ogni modifica ai parametri va testata su almeno un ciclo completo (2015–2024) prima di andare live.
+
+---
+
 ## Re-esecuzione
 
 Un run può essere ri-eseguito: i dati precedenti (weights, performance) vengono cancellati e le metriche azzerata prima di ripartire. Lo stato torna a `RUNNING`.

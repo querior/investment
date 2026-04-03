@@ -12,6 +12,9 @@ import {
 	stopRunApi,
 	getRunApi,
 	getRunWeightsApi,
+	updateRunApi,
+	getBacktestConfigApi,
+	invalidateRunApi,
 } from "../../services/backtest-service";
 import {
 	fetchBacktestsRequest,
@@ -35,6 +38,8 @@ import {
 	createRunRequest,
 	createRunSuccess,
 	createRunFailure,
+	updateRunRequest,
+	updateRunSuccess,
 	deleteRunRequest,
 	deleteRunSuccess,
 	deleteRunFailure,
@@ -44,12 +49,18 @@ import {
 	stopRunRequest,
 	stopRunSuccess,
 	stopRunFailure,
+	invalidateRunRequest,
+	invalidateRunSuccess,
+	invalidateRunFailure,
 	fetchRunDetailRequest,
 	fetchRunDetailSuccess,
 	fetchRunDetailFailure,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
 	fetchRunWeightsFailure,
+	fetchBacktestConfigRequest,
+	fetchBacktestConfigSuccess,
+	fetchBacktestConfigFailure,
 } from "./reducer";
 
 function* fetchBacktestsEffect(action: ReturnType<typeof fetchBacktestsRequest>): any {
@@ -123,6 +134,14 @@ function* createRunEffect(action: ReturnType<typeof createRunRequest>): any {
 	}
 }
 
+function* updateRunEffect(action: ReturnType<typeof updateRunRequest>): any {
+	const { backtestId, runId, patch } = action.payload;
+	try {
+		yield call(updateRunApi, backtestId, runId, patch);
+		yield put(updateRunSuccess({ runId, patch }));
+	} catch {}
+}
+
 function* deleteRunEffect(action: ReturnType<typeof deleteRunRequest>): any {
 	const { backtestId, runId } = action.payload;
 	try {
@@ -169,6 +188,16 @@ function* stopRunEffect(action: ReturnType<typeof stopRunRequest>): any {
 	}
 }
 
+function* invalidateRunEffect(action: ReturnType<typeof invalidateRunRequest>): any {
+	const { backtestId, runId } = action.payload;
+	try {
+		yield call(invalidateRunApi, backtestId, runId);
+		yield put(invalidateRunSuccess(runId));
+	} catch {
+		yield put(invalidateRunFailure());
+	}
+}
+
 function* fetchRunDetailEffect(action: ReturnType<typeof fetchRunDetailRequest>): any {
 	const { backtestId, runId } = action.payload;
 	try {
@@ -189,6 +218,14 @@ function* fetchRunWeightsEffect(action: ReturnType<typeof fetchRunWeightsRequest
 	}
 }
 
+function* fetchBacktestConfigEffect(action: ReturnType<typeof fetchBacktestConfigRequest>): any {
+	try {
+		const config = yield call(getBacktestConfigApi, action.payload);
+		yield put(fetchBacktestConfigSuccess(config));
+	} catch {
+		yield put(fetchBacktestConfigFailure());
+	}
+}
 
 export function* backtestWatcher() {
 	yield takeLatest(fetchBacktestsRequest.type, fetchBacktestsEffect);
@@ -198,9 +235,12 @@ export function* backtestWatcher() {
 	yield takeLatest(deleteBacktestRequest.type, deleteBacktestEffect);
 	yield takeLatest(fetchRunsRequest.type, fetchRunsEffect);
 	yield takeLatest(createRunRequest.type, createRunEffect);
+	yield takeLatest(updateRunRequest.type, updateRunEffect);
 	yield takeLatest(deleteRunRequest.type, deleteRunEffect);
 	yield takeLatest(executeRunRequest.type, executeRunEffect);
 	yield takeLatest(stopRunRequest.type, stopRunEffect);
+	yield takeLatest(invalidateRunRequest.type, invalidateRunEffect);
 	yield takeLatest(fetchRunDetailRequest.type, fetchRunDetailEffect);
 	yield takeLatest(fetchRunWeightsRequest.type, fetchRunWeightsEffect);
+	yield takeLatest(fetchBacktestConfigRequest.type, fetchBacktestConfigEffect);
 }

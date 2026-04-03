@@ -1,61 +1,171 @@
-from typing import Dict
 from sqlalchemy.orm import Session
+from app.services.config_repo import get_asset_classes, get_allocation_parameter, get_neutral_allocation
+from app.db.asset_class import AssetClass
+from app.db.allocation_parameter import AllocationParameter
+from app.db.allocation_adjustment import AllocationAdjustment
+from app.db.allocation_history import AllocationHistory
+from app.db.macro_regimes import MacroRegime
+import datetime
 
 
-def f(x: float) -> float:
-    """Funzione di risposta del pillar. Saturazione lineare."""
-    if x > 2.0:
-        return 1.0
-    if x < -2.0:
-        return -1.0
-    return x / 2.0
+def _get_param(db: Session, key: str) -> float:
+    rec = db.query(AllocationParameter).filter(AllocationParameter.key == key).first()
+    if rec is None:
+        raise ValueError(f"AllocationParameter '{key}' non trovato")
+    return rec.value
 
-
-def compute_allocation_deltas(db: Session, pillars: Dict[str, float]) -> Dict[str, float]:
-    from app.services.config_repo import get_sensitivity, get_asset_classes, get_allocation_parameter
-
-    sensitivity = get_sensitivity(db)
-    assets = [a.name for a in get_asset_classes(db)]
-    K = get_allocation_parameter(db, "scale_factor_k", 0.05)
-    MAX_ABS = get_allocation_parameter(db, "max_abs_delta", 0.10)
-
-    raw_tilt = {asset: 0.0 for asset in assets}
-    for pillar, score in pillars.items():
-        if pillar not in sensitivity:
-            continue
-        signal = f(score)
-        for asset in assets:
-            coeff = sensitivity[pillar].get(asset, 0.0)
-            raw_tilt[asset] += signal * coeff
-
-    for asset in assets:
-        raw_tilt[asset] *= K
-
-    mean_tilt = sum(raw_tilt.values()) / len(raw_tilt)
-    deltas = {asset: raw_tilt[asset] - mean_tilt for asset in assets}
-
-    for asset in assets:
-        if deltas[asset] > MAX_ABS:
-            deltas[asset] = MAX_ABS
-        if deltas[asset] < -MAX_ABS:
-            deltas[asset] = -MAX_ABS
-
+def _apply_constraints(
+    target: dict[str, float],
+    constraints: dict[str, dict[str, float]],
+) -> dict[str, float]:
     return {
-        asset: 0.0 if abs(val) < 1e-12 else float(val)
-        for asset, val in deltas.items()
+        asset: max(constraints[asset]["min"], min(constraints[asset]["max"], value))
+        for asset, value in target.items()
     }
 
 
-def compute_allocation(db: Session, pillars: dict) -> dict:
-    from app.services.config_repo import get_neutral_allocation
-
-    neutral = get_neutral_allocation(db)
-    deltas = compute_allocation_deltas(db, pillars)
-
-    allocation = {
-        asset: neutral[asset] + deltas.get(asset, 0.0)
-        for asset in neutral
-    }
-
+def _rescale(allocation: dict[str, float]) -> dict[str, float]:
     total = sum(allocation.values())
-    return {asset: weight / total for asset, weight in allocation.items()}
+    if total == 0:
+        return {asset: 1.0 / len(allocation) for asset in allocation}
+    return {asset: value / total for asset, value in allocation.items()}
+
+
+def compute_target_allocation(
+    db: Session,
+    regimes: dict[str, str],
+    coherence_factor: float | None = None,
+) -> dict[str, float]:
+
+    # --- carica asset class ---
+    asset_classes = db.query(AssetClass).order_by(AssetClass.display_order).all()
+    assets        = [a.name for a in asset_classes]
+    base          = {a.name: a.neutral_weight for a in asset_classes}
+    constraints   = {
+        a.name: {"min": a.min_weight, "max": a.max_weight}
+        for a in asset_classes
+    }
+
+    # --- carica parametri (override per-run se fornito) ---
+    if coherence_factor is None:
+        coherence_factor = _get_param(db, "coherence.factor")
+
+    # --- carica delta dalla matrice ---
+    adjustments = db.query(AllocationAdjustment).all()
+    delta_map: dict[tuple[str, str, str], float] = {
+        (r.pillar, r.regime, r.asset): r.delta
+        for r in adjustments
+    }
+
+    # --- coefficiente di coerenza ---
+    n_neutral = sum(1 for r in regimes.values() if r == "neutral")
+    coherence = 1.0 - (n_neutral / len(regimes)) * coherence_factor
+
+    # --- somma dei delta ---
+    total_delta = {asset: 0.0 for asset in assets}
+    for pillar, regime in regimes.items():
+        for asset in assets:
+            total_delta[asset] += delta_map.get((pillar, regime, asset), 0.0)
+
+    # --- applica coerenza e calcola target ---
+    target = {
+        asset: base[asset] + total_delta[asset] * coherence
+        for asset in assets
+    }
+
+    # --- applica vincoli e riscala ---
+    target = _apply_constraints(target, constraints)
+    target = _rescale(target)
+
+    return target
+
+def compute_effective_allocation(
+    db: Session,
+    date: datetime.date,
+    target: dict[str, float],
+    run_id: int | None = None,
+    allocation_alpha: float | None = None,
+) -> dict[str, float]:
+
+    alpha = allocation_alpha if allocation_alpha is not None else _get_param(db, "allocation.alpha")
+
+    # carica allocazione effettiva del mese precedente (scoped per run_id)
+    prev_date = (date.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+
+    prev_records = (
+        db.query(AllocationHistory)
+        .filter(
+            AllocationHistory.date == prev_date,
+            AllocationHistory.run_id == run_id,
+        )
+        .all()
+    )
+
+    if not prev_records:
+        return target
+
+    prev = {r.asset: r.effective for r in prev_records}
+
+    effective = {
+        asset: prev[asset] + alpha * (target[asset] - prev[asset])
+        if asset in prev else target[asset]
+        for asset in target
+    }
+
+    return effective
+
+
+def save_allocation(
+    db: Session,
+    date: datetime.date,
+    target: dict[str, float],
+    effective: dict[str, float],
+    run_id: int | None = None,
+) -> None:
+
+    for asset in target:
+        existing = (
+            db.query(AllocationHistory)
+            .filter(
+                AllocationHistory.date == date,
+                AllocationHistory.asset == asset,
+                AllocationHistory.run_id == run_id,
+            )
+            .first()
+        )
+        if existing:
+            existing.target = target[asset]      # type: ignore[assignment]
+            existing.effective = effective[asset]  # type: ignore[assignment]
+        else:
+            db.add(AllocationHistory(
+                date=date,
+                asset=asset,
+                run_id=run_id,
+                target=target[asset],
+                effective=effective[asset],
+            ))
+
+    db.commit()
+    
+def run_monthly_allocation(db: Session, date: datetime.date) -> dict[str, float]:
+    # 1. leggi regimi correnti
+    regime_records = (
+        db.query(MacroRegime)
+        .filter(MacroRegime.date == date)
+        .all()
+    )
+    regimes = {r.pillar: r.regime for r in regime_records}
+
+    if len(regimes) < 4:
+        raise ValueError(f"Regimi incompleti per {date}: trovati {list(regimes.keys())}")
+
+    # 2. calcola allocazione target
+    target = compute_target_allocation(db, regimes)
+
+    # 3. applica smoothing
+    effective = compute_effective_allocation(db, date, target)
+
+    # 4. salva
+    save_allocation(db, date, target, effective)
+
+    return effective

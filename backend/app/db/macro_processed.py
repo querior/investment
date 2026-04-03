@@ -1,13 +1,14 @@
-from sqlalchemy import Column, Date, Float, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Date, String, Float
 from app.db.session import Base
+import datetime
 
 class MacroProcessed(Base):
-    __tablename__ ="macro_processed"
+    __tablename__ = "macro_processed"
 
-    date = Column(Date, primary_key=True)
-    indicator = Column(String, primary_key=True)
-
-    value = Column(Float, nullable=False)
-    z_score = Column(Float, nullable=False)
-
-    source = Column(String, nullable=False, default="FRED")
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    indicator: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    z_score: Mapped[float] = mapped_column(Float, nullable=False)
+    z_score_ema: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="FRED")
