@@ -1,8 +1,13 @@
 import enum
-from sqlalchemy import Boolean, Column, Integer, String, Date, DateTime, Float, Enum, ForeignKey, func
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, Integer, String, Date, DateTime, Float, Enum, ForeignKey, func
 from app.db.session import Base
 
 
+class BacktestInstrument(str, enum.Enum):
+    OPTIONS = "options"  
+    FUTURES = "futures"
+    
 class BacktestFrequency(str, enum.Enum):
     EOM = "EOM"  # End of Month
     EOW = "EOW"  # End of Week
@@ -20,27 +25,26 @@ class BacktestStatus(str, enum.Enum):
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 
-    id = Column(Integer, primary_key=True)
-    backtest_id = Column(Integer, ForeignKey("backtests.id", ondelete="CASCADE"), nullable=False)
-    name = Column(String, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    backtest_id: Mapped[int] = mapped_column(Integer, ForeignKey("backtests.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    start_date = Column(Date, nullable=False)
-    end_date = Column(Date, nullable=False)
-    frequency = Column(Enum(BacktestFrequency, native_enum=False), nullable=False, default=BacktestFrequency.EOM)
-    config_snapshot = Column(String, nullable=True)  # JSON: matrice sensitività + neutral + params
-    status = Column(Enum(BacktestStatus, native_enum=False), nullable=False, default=BacktestStatus.READY)
-    stop_requested = Column(Boolean, nullable=False, default=False)
-    notes = Column(String, nullable=True)
-    error_message = Column(String, nullable=True)
+    start_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    frequency: Mapped[BacktestFrequency] = mapped_column(Enum(BacktestFrequency, native_enum=False), nullable=False, default=BacktestFrequency.EOM)
+    config_snapshot: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[BacktestStatus] = mapped_column(Enum(BacktestStatus, native_enum=False), nullable=False, default=BacktestStatus.READY)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    # metriche aggregate (aggiornate ad ogni ciclo)
-    cagr = Column(Float)
-    volatility = Column(Float)
-    sharpe = Column(Float)
-    max_drawdown = Column(Float)
-    win_rate = Column(Float)
-    profit_factor = Column(Float)
-    n_trades = Column(Integer)
+    cagr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sharpe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    profit_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    n_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)

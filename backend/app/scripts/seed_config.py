@@ -14,7 +14,7 @@ from app.db.processed_indicator import ProcessedIndicator, TransformType, Resamp
 from app.db.pillar import Pillar
 from app.db.pillar_component import PillarComponent
 from app.db.asset_class import AssetClass
-from app.db.allocation_parameter import AllocationParameter
+from app.db.backtest_parameter import BacktestParameter
 from app.db.allocation_adjustment import AllocationAdjustment
 
 
@@ -259,10 +259,10 @@ def seed_allocation_adjustments(db: Session):
 
 def seed_allocation_parameters(db: Session):
     for key, value, description in _ALLOCATION_PARAMETERS:
-        existing = db.query(AllocationParameter).filter_by(key=key).first()
+        existing = db.query(BacktestParameter).filter_by(key=key).first()
         if existing:
             continue
-        db.add(AllocationParameter(key=key, value=value, description=description))
+        db.add(BacktestParameter(key=key, value=value, description=description))
         print(f"  [allocation_parameter] {key} = {value}")
 
 
@@ -290,7 +290,7 @@ def seed_if_needed(db: Session) -> bool:
         seed_pillars(db, processed_map)
         seed_asset_classes(db, symbol_map)
         seed_allocation_adjustments(db)
-        seed_allocation_parameters(db)
+        # seed_allocation_parameters(db)
         db.commit()
         logger.info("seed_config: completato.")
         return True

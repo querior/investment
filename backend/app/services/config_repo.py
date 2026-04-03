@@ -9,7 +9,7 @@ from app.db.processed_indicator import ProcessedIndicator
 from app.db.pillar import Pillar
 from app.db.pillar_component import PillarComponent
 from app.db.asset_class import AssetClass
-from app.db.allocation_parameter import AllocationParameter
+from app.db.backtest_parameter import BacktestParameter
 
 
 def get_fred_tickers(db: Session) -> set[str]:
@@ -87,9 +87,12 @@ def get_asset_classes(db: Session) -> list[AssetClass]:
     return db.query(AssetClass).order_by(AssetClass.display_order).all()
 
 
-def get_allocation_parameter(db: Session, key: str, default: float) -> float:
+def get_allocation_parameter(db: Session, key: str, backtest_id: int, default: float) -> float:
     """Legge un parametro scalare dell'allocation engine."""
-    row = db.query(AllocationParameter).filter(AllocationParameter.key == key).one_or_none()
+    row = db.query(BacktestParameter).filter(
+        BacktestParameter.key == key,
+        BacktestParameter.backtest_id == backtest_id,
+    ).one_or_none()
     return row.value if row else default
 
 

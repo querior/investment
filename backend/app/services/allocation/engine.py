@@ -1,17 +1,19 @@
 from sqlalchemy.orm import Session
-from app.services.config_repo import get_asset_classes, get_allocation_parameter, get_neutral_allocation
 from app.db.asset_class import AssetClass
-from app.db.allocation_parameter import AllocationParameter
 from app.db.allocation_adjustment import AllocationAdjustment
 from app.db.allocation_history import AllocationHistory
+from app.db.backtest_parameter import BacktestParameter
 from app.db.macro_regimes import MacroRegime
 import datetime
 
 
-def _get_param(db: Session, key: str) -> float:
-    rec = db.query(AllocationParameter).filter(AllocationParameter.key == key).first()
+def _get_param(db: Session, key: str, backtest_id: int) -> float:
+    rec = db.query(BacktestParameter).filter(
+        BacktestParameter.key == key,
+        BacktestParameter.backtest_id == backtest_id,
+    ).first()
     if rec is None:
-        raise ValueError(f"AllocationParameter '{key}' non trovato")
+        raise ValueError(f"BacktestParameter '{key}' non trovato per backtest_id {backtest_id}")
     return rec.value
 
 def _apply_constraints(
@@ -34,6 +36,7 @@ def _rescale(allocation: dict[str, float]) -> dict[str, float]:
 def compute_target_allocation(
     db: Session,
     regimes: dict[str, str],
+    backtest_id: int,
     coherence_factor: float | None = None,
 ) -> dict[str, float]:
 
@@ -48,7 +51,7 @@ def compute_target_allocation(
 
     # --- carica parametri (override per-run se fornito) ---
     if coherence_factor is None:
-        coherence_factor = _get_param(db, "coherence.factor")
+        coherence_factor = _get_param(db, "coherence.factor", backtest_id)
 
     # --- carica delta dalla matrice ---
     adjustments = db.query(AllocationAdjustment).all()
@@ -83,11 +86,12 @@ def compute_effective_allocation(
     db: Session,
     date: datetime.date,
     target: dict[str, float],
+    backtest_id: int,
     run_id: int | None = None,
     allocation_alpha: float | None = None,
 ) -> dict[str, float]:
 
-    alpha = allocation_alpha if allocation_alpha is not None else _get_param(db, "allocation.alpha")
+    alpha = allocation_alpha if allocation_alpha is not None else _get_param(db, "allocation.alpha", backtest_id)
 
     # carica allocazione effettiva del mese precedente (scoped per run_id)
     prev_date = (date.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
@@ -146,26 +150,3 @@ def save_allocation(
             ))
 
     db.commit()
-    
-def run_monthly_allocation(db: Session, date: datetime.date) -> dict[str, float]:
-    # 1. leggi regimi correnti
-    regime_records = (
-        db.query(MacroRegime)
-        .filter(MacroRegime.date == date)
-        .all()
-    )
-    regimes = {r.pillar: r.regime for r in regime_records}
-
-    if len(regimes) < 4:
-        raise ValueError(f"Regimi incompleti per {date}: trovati {list(regimes.keys())}")
-
-    # 2. calcola allocazione target
-    target = compute_target_allocation(db, regimes)
-
-    # 3. applica smoothing
-    effective = compute_effective_allocation(db, date, target)
-
-    # 4. salva
-    save_allocation(db, date, target, effective)
-
-    return effective

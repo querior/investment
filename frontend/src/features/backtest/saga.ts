@@ -15,6 +15,7 @@ import {
 	updateRunApi,
 	getBacktestConfigApi,
 	invalidateRunApi,
+	cloneRunApi,
 } from "../../services/backtest-service";
 import {
 	fetchBacktestsRequest,
@@ -61,37 +62,58 @@ import {
 	fetchBacktestConfigRequest,
 	fetchBacktestConfigSuccess,
 	fetchBacktestConfigFailure,
+	cloneRunRequest,
 } from "./reducer";
 
-function* fetchBacktestsEffect(action: ReturnType<typeof fetchBacktestsRequest>): any {
+function* fetchBacktestsEffect(
+	action: ReturnType<typeof fetchBacktestsRequest>
+): any {
 	try {
 		const { page, limit } = action.payload ?? {};
 		const data = yield call(listBacktestsApi, page, limit);
 		yield put(fetchBacktestsSuccess(data));
 	} catch (e: any) {
-		yield put(fetchBacktestsFailure(e?.response?.data?.detail ?? "Failed to load backtests"));
+		yield put(
+			fetchBacktestsFailure(
+				e?.response?.data?.detail ?? "Failed to load backtests"
+			)
+		);
 	}
 }
 
-function* fetchBacktestEffect(action: ReturnType<typeof fetchBacktestRequest>): any {
+function* fetchBacktestEffect(
+	action: ReturnType<typeof fetchBacktestRequest>
+): any {
 	try {
 		const bt = yield call(getBacktestApi, action.payload);
 		yield put(fetchBacktestSuccess(bt));
 	} catch (e: any) {
-		yield put(fetchBacktestFailure(e?.response?.data?.detail ?? "Failed to load backtest"));
+		yield put(
+			fetchBacktestFailure(
+				e?.response?.data?.detail ?? "Failed to load backtest"
+			)
+		);
 	}
 }
 
-function* createBacktestEffect(action: ReturnType<typeof createBacktestRequest>): any {
+function* createBacktestEffect(
+	action: ReturnType<typeof createBacktestRequest>
+): any {
 	try {
 		const { id } = yield call(createBacktestApi, action.payload);
 		yield put(createBacktestSuccess(id));
 	} catch (e: any) {
-		yield put(createBacktestFailure(e?.response?.data?.detail ?? "Failed to create backtest"));
+		yield put(
+			createBacktestFailure(
+				e?.response?.data?.detail ?? "Failed to create backtest"
+			)
+		);
 	}
 }
 
-function* updateBacktestEffect(action: ReturnType<typeof updateBacktestRequest>): any {
+function* updateBacktestEffect(
+	action: ReturnType<typeof updateBacktestRequest>
+): any {
 	const { id, ...payload } = action.payload;
 	try {
 		yield call(updateBacktestApi, id, payload);
@@ -102,7 +124,9 @@ function* updateBacktestEffect(action: ReturnType<typeof updateBacktestRequest>)
 	}
 }
 
-function* deleteBacktestEffect(action: ReturnType<typeof deleteBacktestRequest>): any {
+function* deleteBacktestEffect(
+	action: ReturnType<typeof deleteBacktestRequest>
+): any {
 	const id = action.payload;
 	try {
 		yield call(deleteBacktestApi, id);
@@ -117,7 +141,9 @@ function* fetchRunsEffect(action: ReturnType<typeof fetchRunsRequest>): any {
 		const runs = yield call(listRunsApi, action.payload);
 		yield put(fetchRunsSuccess(runs));
 	} catch (e: any) {
-		yield put(fetchRunsFailure(e?.response?.data?.detail ?? "Failed to load runs"));
+		yield put(
+			fetchRunsFailure(e?.response?.data?.detail ?? "Failed to load runs")
+		);
 	}
 }
 
@@ -130,7 +156,24 @@ function* createRunEffect(action: ReturnType<typeof createRunRequest>): any {
 		const created = runs.find((r: any) => r.id === id);
 		yield put(createRunSuccess(created));
 	} catch (e: any) {
-		yield put(createRunFailure(e?.response?.data?.detail ?? "Failed to create run"));
+		yield put(
+			createRunFailure(e?.response?.data?.detail ?? "Failed to create run")
+		);
+	}
+}
+
+function* cloneRunEffect(action: ReturnType<typeof cloneRunRequest>): any {
+	const { backtestId, runId } = action.payload;
+	try {
+		const { id } = yield call(cloneRunApi, backtestId, runId);
+		// fetch the full run object to get all fields
+		const runs = yield call(listRunsApi, backtestId);
+		const created = runs.find((r: any) => r.id === id);
+		yield put(createRunSuccess(created));
+	} catch (e: any) {
+		yield put(
+			createRunFailure(e?.response?.data?.detail ?? "Failed to create run")
+		);
 	}
 }
 
@@ -188,7 +231,9 @@ function* stopRunEffect(action: ReturnType<typeof stopRunRequest>): any {
 	}
 }
 
-function* invalidateRunEffect(action: ReturnType<typeof invalidateRunRequest>): any {
+function* invalidateRunEffect(
+	action: ReturnType<typeof invalidateRunRequest>
+): any {
 	const { backtestId, runId } = action.payload;
 	try {
 		yield call(invalidateRunApi, backtestId, runId);
@@ -198,27 +243,39 @@ function* invalidateRunEffect(action: ReturnType<typeof invalidateRunRequest>): 
 	}
 }
 
-function* fetchRunDetailEffect(action: ReturnType<typeof fetchRunDetailRequest>): any {
+function* fetchRunDetailEffect(
+	action: ReturnType<typeof fetchRunDetailRequest>
+): any {
 	const { backtestId, runId } = action.payload;
 	try {
 		const run = yield call(getRunApi, backtestId, runId);
 		yield put(fetchRunDetailSuccess(run));
 	} catch (e: any) {
-		yield put(fetchRunDetailFailure(e?.response?.data?.detail ?? "Failed to load run"));
+		yield put(
+			fetchRunDetailFailure(e?.response?.data?.detail ?? "Failed to load run")
+		);
 	}
 }
 
-function* fetchRunWeightsEffect(action: ReturnType<typeof fetchRunWeightsRequest>): any {
+function* fetchRunWeightsEffect(
+	action: ReturnType<typeof fetchRunWeightsRequest>
+): any {
 	const { backtestId, runId } = action.payload;
 	try {
 		const weights = yield call(getRunWeightsApi, backtestId, runId);
 		yield put(fetchRunWeightsSuccess(weights));
 	} catch (e: any) {
-		yield put(fetchRunWeightsFailure(e?.response?.data?.detail ?? "Failed to load weights"));
+		yield put(
+			fetchRunWeightsFailure(
+				e?.response?.data?.detail ?? "Failed to load weights"
+			)
+		);
 	}
 }
 
-function* fetchBacktestConfigEffect(action: ReturnType<typeof fetchBacktestConfigRequest>): any {
+function* fetchBacktestConfigEffect(
+	action: ReturnType<typeof fetchBacktestConfigRequest>
+): any {
 	try {
 		const config = yield call(getBacktestConfigApi, action.payload);
 		yield put(fetchBacktestConfigSuccess(config));
@@ -235,6 +292,7 @@ export function* backtestWatcher() {
 	yield takeLatest(deleteBacktestRequest.type, deleteBacktestEffect);
 	yield takeLatest(fetchRunsRequest.type, fetchRunsEffect);
 	yield takeLatest(createRunRequest.type, createRunEffect);
+	yield takeLatest(cloneRunRequest.type, cloneRunEffect);
 	yield takeLatest(updateRunRequest.type, updateRunEffect);
 	yield takeLatest(deleteRunRequest.type, deleteRunEffect);
 	yield takeLatest(executeRunRequest.type, executeRunEffect);

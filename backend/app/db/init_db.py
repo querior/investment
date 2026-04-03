@@ -8,7 +8,6 @@ from app.db.processed_indicator import ProcessedIndicator
 from app.db.pillar import Pillar
 from app.db.pillar_component import PillarComponent
 from app.db.asset_class import AssetClass
-from app.db.allocation_parameter import AllocationParameter
 
 # tabelle dati (child — hanno FK verso le config entities)
 from app.db.macro_raw import MacroRaw
@@ -21,13 +20,34 @@ from app.db.allocation_history import AllocationHistory
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
     _migrate()
+    Base.metadata.create_all(bind=engine)
 
 
 def _migrate() -> None:
     with engine.begin() as conn:
         conn.execute(text("""
+            -- Rinomina allocation_parameters → backtest_parameters
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_name = 'allocation_parameters'
+                ) THEN
+                    ALTER TABLE allocation_parameters RENAME TO backtest_parameters;
+                END IF;
+            END $$;
+            -- Aggiunge backtest_id a backtest_parameters
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'backtest_parameters' AND column_name = 'backtest_id'
+                ) THEN
+                    ALTER TABLE backtest_parameters
+                        ADD COLUMN backtest_id INTEGER REFERENCES backtests(id) ON DELETE CASCADE;
+                END IF;
+            END $$;
             -- Migrazione allocation_history: aggiunge id SERIAL come PK e run_id per isolamento backtest
             DO $$
             BEGIN

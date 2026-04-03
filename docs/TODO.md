@@ -16,12 +16,12 @@
 ## Backtest
 - [x] Struttura Backtest (container) → BacktestRun (esecuzione)
 - [x] Frequenza EOM con resample mensile dei prezzi
-- [x] Indice primario esplicito (MacroScore) che guida il ritmo di ribilanciamento
 - [x] No look-ahead: MacroPillar.date ≤ d, ritorno su periodo futuro
 - [x] Config snapshot per storicizzare la matrice usata in ogni run
 - [x] Metriche in real-time (CAGR, Sharpe, Vol, MaxDD, WinRate, PF, N.Trades)
 - [x] Grafico NAV aggiornato ad ogni ciclo di polling
 - [x] Stop/restart idempotente del run
+- [ ] Rendere editabile la matrice di allocazione al fine di gestire differenti tipi di allocazione
 - [ ] Supporto frequenze EOW e EOD nel loader
 - [ ] Benchmark di confronto (es. SPY buy&hold) nel grafico NAV
 - [ ] Export CSV dei risultati
@@ -41,3 +41,6 @@
 
 ## Integrazione
 - [ ] Integrazione tra layer
+
+## Frontend 
+[] Spostare EditableRunName e EditableDateRange di BacktestDetail in components

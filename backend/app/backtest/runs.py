@@ -62,8 +62,8 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
     # --- leggi parametri per-run ---
     param_rows = db.query(BacktestRunParameter).filter(BacktestRunParameter.run_id == run_id).all()
     params = {p.key: p.value for p in param_rows}
-    coherence_factor    = float(params.get("coherence.factor",  str(get_allocation_parameter(db, "coherence.factor", 0.5))))
-    allocation_alpha    = float(params.get("allocation.alpha",  str(get_allocation_parameter(db, "allocation.alpha", 0.3))))
+    coherence_factor    = float(params.get("coherence.factor",  str(get_allocation_parameter(db, "coherence.factor", run.backtest_id, 0.5))))
+    allocation_alpha    = float(params.get("allocation.alpha",  str(get_allocation_parameter(db, "allocation.alpha", run.backtest_id, 0.3))))
     initial_allocation  = params.get("initial_allocation", "neutral")
 
     # --- snapshot configurazione al momento dell'esecuzione ---
@@ -149,7 +149,7 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
                     continue
 
                 regimes    = {row.pillar: row.regime for row in regime_rows}
-                new_target = compute_target_allocation(db, regimes, coherence_factor=coherence_factor)
+                new_target = compute_target_allocation(db, regimes, run.backtest_id, coherence_factor=coherence_factor)
 
                 if new_target != last_target:
                     n_trades += 1
@@ -164,7 +164,7 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
 
             # --- compute_effective_allocation (EWM via AllocationHistory scoped per run) ---
             effective = compute_effective_allocation(
-                db, d, target, run_id=run_id, allocation_alpha=allocation_alpha,
+                db, d, target, run.backtest_id, run_id=run_id, allocation_alpha=allocation_alpha,
             )
 
             # --- persiste in AllocationHistory per il ciclo successivo ---

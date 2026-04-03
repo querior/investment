@@ -33,6 +33,7 @@ import {
 	fetchRunDetailRequest,
 	fetchRunWeightsRequest,
 	fetchBacktestConfigRequest,
+	fetchBacktestRequest,
 	executeRunRequest,
 	stopRunRequest,
 	updateRunRequest,
@@ -40,14 +41,16 @@ import {
 } from "../features/backtest/reducer";
 import type { RootState } from "../store/reducers";
 import Chart from "../components/charts/Chart";
-import type {
+
+import { getRunNavApi } from "../services/backtest-service";
+import {
 	AdjustmentDto,
 	BacktestStatus,
+	FrequencyType,
 	InitialAllocation,
 	RunWeightDto,
-} from "../services/backtest-service";
-import { getRunNavApi } from "../services/backtest-service";
-
+} from "../features/backtest/types";
+import { capitalize } from "../utils/string";
 
 const STATUS_BADGE: Record<
 	BacktestStatus,
@@ -130,10 +133,15 @@ function RegimesCell({ row }: { row: PivotRow }) {
 		<span className="text-xs flex flex-wrap gap-x-2">
 			{Object.entries(row.pillar_scores).map(([pillar, regime]) => {
 				const isStr = typeof regime === "string";
-				const label = isStr ? (regime as string).slice(0, 3) : (regime as number).toFixed(2);
+				const label = isStr
+					? (regime as string).slice(0, 3)
+					: (regime as number).toFixed(2);
 				const colorKey = isStr ? (regime as string) : "";
 				return (
-					<span key={pillar} className={REGIME_COLOR[colorKey] ?? "text-gray-400"}>
+					<span
+						key={pillar}
+						className={REGIME_COLOR[colorKey] ?? "text-gray-400"}
+					>
 						{pillar[0]}={label}
 					</span>
 				);
@@ -152,7 +160,6 @@ function RegimeAdjustmentsCard({
 	adjustments: AdjustmentDto[];
 	neutral: Record<string, number>;
 }) {
-	console.log("adjustments", adjustments);
 	const assets = Object.keys(neutral);
 
 	const tabItems = REGIMES.map((regime) => {
@@ -270,6 +277,7 @@ export default function BacktestRunDetail() {
 	const navigate = useNavigate();
 
 	const {
+		current: currentBacktest,
 		currentRun,
 		currentRunLoading,
 		runWeights,
@@ -283,6 +291,7 @@ export default function BacktestRunDetail() {
 	const [navData, setNavData] = useState<{ date: string; nav: number }[]>([]);
 
 	useEffect(() => {
+		dispatch(fetchBacktestRequest(backtestId));
 		dispatch(fetchRunDetailRequest({ backtestId, runId: runIdNum }));
 		dispatch(fetchRunWeightsRequest({ backtestId, runId: runIdNum }));
 		dispatch(fetchBacktestConfigRequest(backtestId));
@@ -306,28 +315,30 @@ export default function BacktestRunDetail() {
 	const isDone = currentRun?.status === "DONE";
 	const isRunning = currentRun?.status === "RUNNING" || isExecuting;
 
-	const runParam = (key: string, fallback: number): number => {
-		const raw = currentRun?.parameters?.[key];
-		return raw != null ? parseFloat(raw) : fallback;
-	};
-	const currentInitialAllocation = (currentRun?.parameters?.["initial_allocation"] ?? "neutral") as InitialAllocation;
-
-	type ParamDraft = {
-		coherence_factor: number;
-		allocation_alpha: number;
-		initial_allocation: InitialAllocation;
-	};
+	type ParamDraft = Record<string, string | number>;
 
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState<ParamDraft | null>(null);
 
+	const isPercentParam = (key: string): boolean => {
+		return key.includes("factor") || key.includes("alpha");
+	};
+
+	const isSelectParam = (key: string): boolean => {
+		return key === "initial_allocation";
+	};
+
 	const startEdit = () => {
-		if (!currentRun) return;
-		setDraft({
-			coherence_factor: runParam("coherence.factor", 0.5) * 100,
-			allocation_alpha: runParam("allocation.alpha", 0.3) * 100,
-			initial_allocation: currentInitialAllocation,
-		});
+		if (!currentRun?.parameters) return;
+		const newDraft: ParamDraft = {};
+		for (const [key, value] of Object.entries(currentRun.parameters)) {
+			if (isPercentParam(key)) {
+				newDraft[key] = parseFloat(value as string) * 100;
+			} else {
+				newDraft[key] = value;
+			}
+		}
+		setDraft(newDraft);
 		setIsEditing(true);
 	};
 
@@ -336,10 +347,20 @@ export default function BacktestRunDetail() {
 		setDraft(null);
 	};
 
-	const INITIAL_ALLOCATION_OPTIONS: { value: InitialAllocation; label: string }[] = [
+	const INITIAL_ALLOCATION_OPTIONS: {
+		value: InitialAllocation;
+		label: string;
+	}[] = [
 		{ value: "neutral", label: "Neutral weights" },
-		{ value: "target",  label: "First target" },
+		{ value: "target", label: "First target" },
 	];
+
+	const getParamLabel = (key: string): string => {
+		return key
+			.split("_")
+			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+			.join(" ");
+	};
 
 	type InfoDraft = { name: string; start: string; end: string };
 	const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -379,17 +400,19 @@ export default function BacktestRunDetail() {
 
 	const saveParams = () => {
 		if (!draft) return;
+		const params: Record<string, string> = {};
+		for (const [key, value] of Object.entries(draft)) {
+			if (isPercentParam(key)) {
+				params[key] = String((value as number) / 100);
+			} else {
+				params[key] = String(value);
+			}
+		}
 		dispatch(
 			updateRunRequest({
 				backtestId,
 				runId: runIdNum,
-				patch: {
-					parameters: {
-						"coherence.factor": String(draft.coherence_factor / 100),
-						"allocation.alpha": String(draft.allocation_alpha / 100),
-						"initial_allocation": draft.initial_allocation,
-					},
-				},
+				patch: { parameters: params },
 			})
 		);
 		dispatch(invalidateRunRequest({ backtestId, runId: runIdNum }));
@@ -421,13 +444,19 @@ export default function BacktestRunDetail() {
 								</Button>
 							) : (
 								<div className="flex gap-2">
-									{(currentRun.status === "DONE" || currentRun.status === "ERROR" || currentRun.status === "STOPPED") && (
+									{(currentRun.status === "DONE" ||
+										currentRun.status === "ERROR" ||
+										currentRun.status === "STOPPED") && (
 										<Popconfirm
 											title="Cancella i risultati e riporta il run a READY?"
 											okText="Reset"
 											okButtonProps={{ danger: true }}
 											cancelText="Annulla"
-											onConfirm={() => dispatch(invalidateRunRequest({ backtestId, runId: runIdNum }))}
+											onConfirm={() =>
+												dispatch(
+													invalidateRunRequest({ backtestId, runId: runIdNum })
+												)
+											}
 										>
 											<Button
 												icon={<ReloadOutlined />}
@@ -511,7 +540,7 @@ export default function BacktestRunDetail() {
 										<span className="text-gray-500 block">Frequency</span>
 										<span className="font-medium">{currentRun.frequency}</span>
 									</div>
-										<div>
+									<div>
 										<span className="text-gray-500 block">Status</span>
 										<Badge
 											status={STATUS_BADGE[currentRun.status].status}
@@ -558,6 +587,14 @@ export default function BacktestRunDetail() {
 											</div>
 										</>
 									)}
+									{currentBacktest?.instrument && (
+										<div className="w-full">
+											<span className="text-gray-500 block">Instrument</span>
+											<span className="font-medium">
+												{capitalize(currentBacktest.instrument)}
+											</span>
+										</div>
+									)}
 									{currentRun.notes && (
 										<div>
 											<span className="text-gray-500 block">Notes</span>
@@ -574,7 +611,6 @@ export default function BacktestRunDetail() {
 											</div>
 										)}
 								</div>
-
 							</div>
 
 							{/* DIVIDER */}
@@ -594,7 +630,7 @@ export default function BacktestRunDetail() {
 														size="small"
 														icon={<CloseOutlined />}
 														onClick={cancelEdit}
-														>
+													>
 														Annulla
 													</Button>
 													<Button
@@ -620,113 +656,115 @@ export default function BacktestRunDetail() {
 									)}
 								</div>
 								<div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
-									<div>
-										<span className="text-gray-500 block">
-											Coherence factor
-										</span>
-										{isEditing && draft ? (
-											<span className="flex items-center gap-1">
-												<InputNumber
-													size="small"
-													min={0}
-													max={100}
-													step={5}
-													className="w-20"
-													value={draft.coherence_factor}
-													onChange={(v) =>
-														v != null &&
-														setDraft({ ...draft, coherence_factor: v })
-													}
-												/>
-												<span className="text-gray-400">%</span>
-											</span>
-										) : (
-											<span className="font-mono font-medium">
-												{(runParam("coherence.factor", 0.5) * 100).toFixed(0)}%
-											</span>
-										)}
-									</div>
+									{currentRun?.parameters &&
+										Object.entries(currentRun.parameters).map(
+											([key, value]) => {
+												const isPercent = isPercentParam(key);
+												const isSelect = isSelectParam(key);
+												const displayLabel = getParamLabel(key);
+												const displayValue = isPercent
+													? (parseFloat(value as string) * 100).toFixed(0)
+													: value;
 
-									<div>
-										<span className="text-gray-500 block">
-											Allocation alpha
-										</span>
-										{isEditing && draft ? (
-											<span className="flex items-center gap-1">
-												<InputNumber
-													size="small"
-													min={0}
-													max={100}
-													step={5}
-													className="w-20"
-													value={draft.allocation_alpha}
-													onChange={(v) =>
-														v != null &&
-														setDraft({ ...draft, allocation_alpha: v })
-													}
-												/>
-												<span className="text-gray-400">%</span>
-											</span>
-										) : (
-											<span className="font-mono font-medium">
-												{(runParam("allocation.alpha", 0.3) * 100).toFixed(0)}%
-											</span>
+												return (
+													<div
+														key={key}
+														className={isSelect ? "col-span-2" : ""}
+													>
+														<span className="text-gray-500 block">
+															{displayLabel}
+														</span>
+														{isEditing && draft ? (
+															isSelect ? (
+																<Select
+																	size="small"
+																	className="w-40"
+																	value={draft[key] as string}
+																	options={INITIAL_ALLOCATION_OPTIONS}
+																	onChange={(v) =>
+																		setDraft({ ...draft, [key]: v })
+																	}
+																/>
+															) : isPercent ? (
+																<span className="flex items-center gap-1">
+																	<InputNumber
+																		size="small"
+																		min={0}
+																		max={100}
+																		step={5}
+																		className="w-20"
+																		value={draft[key] as number}
+																		onChange={(v) =>
+																			v != null &&
+																			setDraft({ ...draft, [key]: v })
+																		}
+																	/>
+																	<span className="text-gray-400">%</span>
+																</span>
+															) : (
+																<Input
+																	size="small"
+																	value={draft[key] as string}
+																	onChange={(e) =>
+																		setDraft({
+																			...draft,
+																			[key]: e.target.value,
+																		})
+																	}
+																/>
+															)
+														) : (
+															<span className="font-mono font-medium">
+																{isPercent ? `${displayValue}%` : displayValue}
+															</span>
+														)}
+													</div>
+												);
+											}
 										)}
-									</div>
 
-									<div className="col-span-2">
-										<span className="text-gray-500 block">Starting allocation</span>
-										{isEditing && draft ? (
-											<Select
-												size="small"
-												className="w-40"
-												value={draft.initial_allocation}
-												options={INITIAL_ALLOCATION_OPTIONS}
-												onChange={(v) =>
-													setDraft({ ...draft, initial_allocation: v })
-												}
-											/>
-										) : (
-											<span className="font-medium">
-												{INITIAL_ALLOCATION_OPTIONS.find(
-													(o) => o.value === currentInitialAllocation
-												)?.label ?? currentInitialAllocation}
-											</span>
-										)}
-									</div>
-
-									{(draft?.initial_allocation ?? currentInitialAllocation) === "neutral" ? (
+									{currentRun?.parameters &&
+									currentBacktest?.frequency === "EOM" &&
+									(draft?.initial_allocation ??
+										currentRun.parameters.initial_allocation) === "neutral" ? (
 										backtestConfig && (
 											<div className="col-span-2 pt-3 border-t border-gray-100">
 												<span className="text-gray-500 text-xs uppercase tracking-wide block mb-2">
 													Portafoglio neutro
 												</span>
 												<div className="flex gap-6">
-													{Object.entries(backtestConfig.neutral).map(([asset, w]) => (
-														<div key={asset} className="text-sm">
-															<span className="font-medium">{asset}</span>
-															<div className="font-mono text-gray-700">
-																{(w * 100).toFixed(0)}%
-															</div>
-														</div>
-													))}
+													{backtestConfig?.neutral &&
+														Object.entries(backtestConfig.neutral).map(
+															([asset, w]) => (
+																<div key={asset} className="text-sm">
+																	<span className="font-medium">{asset}</span>
+																	<div className="font-mono text-gray-700">
+																		{(w * 100).toFixed(0)}%
+																	</div>
+																</div>
+															)
+														)}
 												</div>
 											</div>
 										)
-									) : (
+									) : currentBacktest?.frequency === "EOM" &&
+									  (draft?.initial_allocation ??
+											currentRun.parameters.initial_allocation) !==
+											"neutral" ? (
 										<div className="col-span-2 pt-3 border-t border-gray-100">
 											<span className="text-gray-400 text-xs">
-												L'allocazione iniziale sarà il target calcolato al primo mese disponibile. Visibile dopo l'esecuzione.
+												L'allocazione iniziale sarà il target calcolato al primo
+												mese disponibile. Visibile dopo l'esecuzione.
 											</span>
 										</div>
-									)}
+									) : null}
 								</div>
 							</div>
 						</div>
 					</Card>
 
 					{/* Regime adjustments */}
-					{backtestConfig && (
+					{backtestConfig?.adjustments && (
 						<RegimeAdjustmentsCard
 							adjustments={backtestConfig.adjustments}
 							neutral={backtestConfig.neutral}

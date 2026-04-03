@@ -31,7 +31,8 @@ def init_backtest_db(reset: bool = False) -> None:
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE backtests
-                ADD COLUMN IF NOT EXISTS frequency     VARCHAR DEFAULT 'EOM';
+                ADD COLUMN IF NOT EXISTS frequency     VARCHAR DEFAULT 'EOM',
+                ADD COLUMN IF NOT EXISTS instrument    VARCHAR;
             ALTER TABLE backtest_runs
                 ADD COLUMN IF NOT EXISTS frequency        VARCHAR DEFAULT 'EOM',
                 ADD COLUMN IF NOT EXISTS config_snapshot  VARCHAR,

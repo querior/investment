@@ -1,36 +1,13 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import type { BacktestConfigDto, BacktestDto, BacktestRunDto, CreateBacktestPayload, CreateRunPayload, RunWeightDto } from "../../services/backtest-service";
-
-export type BacktestState = {
-	// list
-	backtests: BacktestDto[];
-	total: number;
-	page: number;
-	loading: boolean;
-	error: string | null;
-	// create backtest
-	creating: boolean;
-	createError: string | null;
-	lastCreatedId: number | null;
-	// current backtest detail
-	current: BacktestDto | null;
-	currentLoading: boolean;
-	// runs for current backtest
-	runs: BacktestRunDto[];
-	runsLoading: boolean;
-	// create/execute run
-	creatingRun: boolean;
-	executingRunId: number | null;
-	invalidatingRunId: number | null;
-	// run detail
-	currentRun: BacktestRunDto | null;
-	currentRunLoading: boolean;
-	runWeights: RunWeightDto[];
-	runWeightsLoading: boolean;
-	// backtest config
-	backtestConfig: BacktestConfigDto | null;
-	backtestConfigLoading: boolean;
-};
+import type {
+	BacktestConfigDto,
+	BacktestDto,
+	BacktestRunDto,
+	BacktestState,
+	CreateBacktestPayload,
+	CreateRunPayload,
+	RunWeightDto,
+} from "./types";
 
 const initialState: BacktestState = {
 	backtests: [],
@@ -61,11 +38,21 @@ const slice = createSlice({
 	initialState,
 	reducers: {
 		// --- list ---
-		fetchBacktestsRequest(state, _action: PayloadAction<{ page?: number; limit?: number } | undefined>) {
+		fetchBacktestsRequest(
+			state,
+			_action: PayloadAction<{ page?: number; limit?: number } | undefined>
+		) {
 			state.loading = true;
 			state.error = null;
 		},
-		fetchBacktestsSuccess(state, action: PayloadAction<{ items: BacktestDto[]; total: number; page: number }>) {
+		fetchBacktestsSuccess(
+			state,
+			action: PayloadAction<{
+				items: BacktestDto[];
+				total: number;
+				page: number;
+			}>
+		) {
 			state.loading = false;
 			state.backtests = action.payload.items;
 			state.total = action.payload.total;
@@ -89,7 +76,10 @@ const slice = createSlice({
 			state.error = action.payload;
 		},
 		// --- create backtest ---
-		createBacktestRequest(state, _action: PayloadAction<CreateBacktestPayload>) {
+		createBacktestRequest(
+			state,
+			_action: PayloadAction<CreateBacktestPayload>
+		) {
 			state.creating = true;
 			state.createError = null;
 			state.lastCreatedId = null;
@@ -106,7 +96,14 @@ const slice = createSlice({
 			state.lastCreatedId = null;
 		},
 		// --- update backtest ---
-		updateBacktestRequest(_state, _action: PayloadAction<{ id: number; name?: string; description?: string }>) {},
+		updateBacktestRequest(
+			_state,
+			_action: PayloadAction<{
+				id: number;
+				name?: string;
+				description?: string;
+			}>
+		) {},
 		updateBacktestSuccess(state, action: PayloadAction<number>) {
 			if (state.current?.id === action.payload) state.current = null;
 		},
@@ -131,39 +128,79 @@ const slice = createSlice({
 			state.error = action.payload;
 		},
 		// --- create run ---
-		createRunRequest(state, _action: PayloadAction<{ backtestId: number; payload: CreateRunPayload }>) {
+		createRunRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; payload: CreateRunPayload }>
+		) {
 			state.creatingRun = true;
 		},
 		createRunSuccess(state, action: PayloadAction<BacktestRunDto>) {
 			state.creatingRun = false;
 			state.runs = [action.payload, ...state.runs];
 		},
+		cloneRunRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
+			state.creatingRun = true;
+		},
 		createRunFailure(state, action: PayloadAction<string>) {
 			state.creatingRun = false;
 			state.error = action.payload;
 		},
 		// --- update run ---
-		updateRunRequest(_state, _action: PayloadAction<{ backtestId: number; runId: number; patch: { name?: string; start?: string; end?: string; parameters?: Record<string, string> } }>) {},
-		updateRunSuccess(state, action: PayloadAction<{ runId: number; patch: { name?: string; start?: string; end?: string; parameters?: Record<string, string> } }>) {
+		updateRunRequest(
+			_state,
+			_action: PayloadAction<{
+				backtestId: number;
+				runId: number;
+				patch: {
+					name?: string;
+					start?: string;
+					end?: string;
+					parameters?: Record<string, string>;
+				};
+			}>
+		) {},
+		updateRunSuccess(
+			state,
+			action: PayloadAction<{
+				runId: number;
+				patch: {
+					name?: string;
+					start?: string;
+					end?: string;
+					parameters?: Record<string, string>;
+				};
+			}>
+		) {
 			const { name, start, end, parameters } = action.payload.patch;
 			const applyTo = (run: BacktestRunDto) => {
 				if (name !== undefined) run.name = name;
 				if (start !== undefined) run.start_date = start;
 				if (end !== undefined) run.end_date = end;
-				if (parameters !== undefined) run.parameters = { ...run.parameters, ...parameters };
+				if (parameters !== undefined)
+					run.parameters = { ...run.parameters, ...parameters };
 			};
 			const run = state.runs.find((r) => r.id === action.payload.runId);
 			if (run) applyTo(run);
-			if (state.currentRun?.id === action.payload.runId) applyTo(state.currentRun);
+			if (state.currentRun?.id === action.payload.runId)
+				applyTo(state.currentRun);
 		},
 		// --- delete run ---
-		deleteRunRequest(_state, _action: PayloadAction<{ backtestId: number; runId: number }>) {},
+		deleteRunRequest(
+			_state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {},
 		deleteRunSuccess(state, action: PayloadAction<number>) {
 			state.runs = state.runs.filter((r) => r.id !== action.payload);
 		},
 		deleteRunFailure(_state, _action: PayloadAction<number>) {},
 		// --- run detail ---
-		fetchRunDetailRequest(state, _action: PayloadAction<{ backtestId: number; runId: number }>) {
+		fetchRunDetailRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
 			state.currentRunLoading = true;
 			state.currentRun = null;
 		},
@@ -176,7 +213,10 @@ const slice = createSlice({
 			state.error = action.payload;
 		},
 		// --- run weights ---
-		fetchRunWeightsRequest(state, _action: PayloadAction<{ backtestId: number; runId: number }>) {
+		fetchRunWeightsRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
 			state.runWeightsLoading = true;
 			state.runWeights = [];
 		},
@@ -191,7 +231,10 @@ const slice = createSlice({
 		fetchBacktestConfigRequest(state, _action: PayloadAction<number>) {
 			state.backtestConfigLoading = true;
 		},
-		fetchBacktestConfigSuccess(state, action: PayloadAction<BacktestConfigDto>) {
+		fetchBacktestConfigSuccess(
+			state,
+			action: PayloadAction<BacktestConfigDto>
+		) {
 			state.backtestConfigLoading = false;
 			state.backtestConfig = action.payload;
 		},
@@ -199,11 +242,15 @@ const slice = createSlice({
 			state.backtestConfigLoading = false;
 		},
 		// --- execute run ---
-		executeRunRequest(state, action: PayloadAction<{ backtestId: number; runId: number }>) {
+		executeRunRequest(
+			state,
+			action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
 			state.executingRunId = action.payload.runId;
 			const run = state.runs.find((r) => r.id === action.payload.runId);
 			if (run) run.status = "RUNNING";
-			if (state.currentRun?.id === action.payload.runId) state.currentRun.status = "RUNNING";
+			if (state.currentRun?.id === action.payload.runId)
+				state.currentRun.status = "RUNNING";
 		},
 		executeRunSuccess(state, action: PayloadAction<number>) {
 			state.executingRunId = null;
@@ -212,13 +259,19 @@ const slice = createSlice({
 			state.executingRunId = null;
 		},
 		// --- stop run ---
-		stopRunRequest(state, action: PayloadAction<{ backtestId: number; runId: number }>) {
+		stopRunRequest(
+			state,
+			action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
 			// polling aggiornerà lo status; mostriamo solo loading sul bottone
 		},
 		stopRunSuccess(_state, _action: PayloadAction<void>) {},
 		stopRunFailure(_state, _action: PayloadAction<void>) {},
 		// --- invalidate run ---
-		invalidateRunRequest(state, action: PayloadAction<{ backtestId: number; runId: number }>) {
+		invalidateRunRequest(
+			state,
+			action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
 			state.invalidatingRunId = action.payload.runId;
 		},
 		invalidateRunSuccess(state, action: PayloadAction<number>) {
@@ -269,6 +322,7 @@ export const {
 	createRunRequest,
 	createRunSuccess,
 	createRunFailure,
+	cloneRunRequest,
 	updateRunRequest,
 	updateRunSuccess,
 	deleteRunRequest,
