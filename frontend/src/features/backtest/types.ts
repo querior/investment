@@ -90,6 +90,32 @@ export type RunWeightDto = {
 	pillar_scores: string | null; // JSON string: {"Growth": "expansion", ...}
 };
 
+export type BacktestPortfolioPerformanceDto = {
+	snapshot_date: string;
+	cash: number;
+	positions_value: number;
+	total_equity: number;
+	realized_pnl: number;
+	unrealized_pnl: number;
+	total_pnl: number;
+	total_delta: number;
+	total_gamma: number;
+	total_theta: number;
+	total_vega: number;
+	open_positions_count: number;
+	closed_positions_count: number;
+	new_positions_count: number;
+	underlying_price: number;
+	iv: number;
+};
+
+export type PortfolioPerformanceState = {
+	items: BacktestPortfolioPerformanceDto[];
+	page: number;
+	page_size: number;
+	total: number;
+};
+
 export type BacktestState = {
 	// list
 	backtests: BacktestDto[];
@@ -116,6 +142,7 @@ export type BacktestState = {
 	currentRunLoading: boolean;
 	runWeights: RunWeightDto[];
 	runWeightsLoading: boolean;
+	portfolioPerformances: PortfolioPerformanceState;
 	// backtest config
 	backtestConfig: BacktestConfigDto | null;
 	backtestConfigLoading: boolean;

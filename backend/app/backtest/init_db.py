@@ -41,6 +41,17 @@ def init_backtest_db(reset: bool = False) -> None:
                 ADD COLUMN IF NOT EXISTS n_trades         INTEGER;
             ALTER TABLE backtest_weights
                 ADD COLUMN IF NOT EXISTS pillar_scores VARCHAR;
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'backtest_performance'
+                      AND column_name = 'monthly_return'
+                ) THEN
+                    ALTER TABLE backtest_performance
+                        RENAME COLUMN monthly_return TO period_return;
+                END IF;
+            END $$;
             CREATE TABLE IF NOT EXISTS backtest_run_parameters (
                 id     SERIAL PRIMARY KEY,
                 run_id INTEGER NOT NULL REFERENCES backtest_runs(id) ON DELETE CASCADE,

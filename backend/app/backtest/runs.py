@@ -1,12 +1,21 @@
 import datetime
 import json
 import math
-from sqlalchemy.orm import Session
+from fastapi import HTTPException
+from sqlalchemy.orm import Session, joinedload
 from typing import Any, cast
+import pandas as pd
+import logging
+from app.backtest.option.strategy import create_bull_put_spread, should_close_position
+from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
+from app.backtest.schemas.backtest_position import BacktestPosition
+from app.backtest.schemas.backtest_position_snapshot import BacktestPositionSnapshot
+from app.db.session import SessionLocal
 from app.backtest.schemas import BacktestRun, BacktestWeight, BacktestPerformance
-from app.backtest.schemas.backtest_run import BacktestStatus
+from app.backtest.schemas.backtest_run import BacktestFrequency, BacktestStatus
 from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
 from app.backtest.loaders import load_asset_returns
+from app.db.market_price import MarketPrice
 from app.services.allocation.engine import (
     compute_target_allocation,
     compute_effective_allocation,
@@ -17,21 +26,22 @@ from app.services.config_repo import get_neutral_allocation, get_allocation_para
 from app.db.allocation_adjustment import AllocationAdjustment
 from app.db.allocation_history import AllocationHistory
 from app.db.macro_regimes import MacroRegime
-from app.backtest.metrics import compute_metrics
+from app.backtest.metrics import compute_metrics, compute_run_eod_metrics
+from .models import Portfolio
 
+logger = logging.getLogger(__name__)
 
 def _update_metrics(db: Session, run: BacktestRun, n_trades: int) -> None:
     """Ricalcola e salva le metriche sui dati parziali o completi già scritti."""
-    nav_series: list[float] = [
-        r.nav  # type: ignore[list-item]
-        for r in (
+    nav_series = [
+        r.nav for r in (
             db.query(BacktestPerformance)
             .filter(BacktestPerformance.run_id == run.id)
             .order_by(BacktestPerformance.date)
             .all()
         )
     ]
-    metrics = compute_metrics(nav_series)
+    metrics = compute_metrics(nav_series) # type: ignore[assignment]
     r: Any = run
     if metrics:
         def _safe(v: float | None) -> float | None:
@@ -45,7 +55,7 @@ def _update_metrics(db: Session, run: BacktestRun, n_trades: int) -> None:
     r.n_trades = n_trades
 
 
-def execute_backtest(db: Session, run: BacktestRun) -> None:
+def execute_eom_backtest(db: Session, run: BacktestRun) -> None:
     """
     Esegue il backtest sul run passato seguendo il flusso mensile di layer-long:
       regime detection → compute_target_allocation → compute_effective_allocation → save_allocation
@@ -80,9 +90,7 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
     })
 
     # --- pulizia dati precedenti (idempotente) ---
-    db.query(BacktestWeight).filter(BacktestWeight.run_id == run_id).delete()
-    db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
-    db.query(AllocationHistory).filter(AllocationHistory.run_id == run_id).delete()
+    clean_eom_backtest_run(db, run.id)
     for field in ("cagr", "volatility", "sharpe", "max_drawdown", "win_rate", "profit_factor", "n_trades", "error_message"):
         setattr(r, field, None)
     r.status = BacktestStatus.RUNNING
@@ -142,14 +150,14 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
             else:
                 regime_rows = (
                     db.query(MacroRegime)
-                    .filter(MacroRegime.date == current_regime_date)
-                    .all()
+                      .filter(MacroRegime.date == current_regime_date)
+                      .all()
                 )
                 if not regime_rows:
                     continue
 
                 regimes    = {row.pillar: row.regime for row in regime_rows}
-                new_target = compute_target_allocation(db, regimes, run.backtest_id, coherence_factor=coherence_factor)
+                new_target = compute_target_allocation(db, regimes, backtest_id=run.backtest_id, coherence_factor=coherence_factor)
 
                 if new_target != last_target:
                     n_trades += 1
@@ -164,7 +172,7 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
 
             # --- compute_effective_allocation (EWM via AllocationHistory scoped per run) ---
             effective = compute_effective_allocation(
-                db, d, target, run.backtest_id, run_id=run_id, allocation_alpha=allocation_alpha,
+                db, d, target, run_id=run_id, allocation_alpha=allocation_alpha, backtest_id=run.backtest_id
             )
 
             # --- persiste in AllocationHistory per il ciclo successivo ---
@@ -191,7 +199,7 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
                 run_id=run_id,
                 date=next_d,
                 nav=nav,
-                monthly_return=ret,
+                period_return=ret,
             ))
 
             db.commit()
@@ -212,17 +220,261 @@ def execute_backtest(db: Session, run: BacktestRun) -> None:
         r.error_message = str(e)
         db.commit()
         raise e
+    
+def clean_eom_backtest_run(db: Session, run_id: int):
+    run = (
+        db.query(BacktestRun)
+        .options(joinedload(BacktestRun.backtest))
+        .filter(BacktestRun.id == run_id)
+        .first()
+    )
+    
+    
+    db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
+    db.query(BacktestWeight).filter(BacktestWeight.run_id == run_id).delete()
+    db.query(AllocationHistory).filter(AllocationHistory.run_id == run_id).delete()
+
+    for field in ("cagr", "volatility", "sharpe", "max_drawdown", "win_rate", "profit_factor", "n_trades", "config_snapshot", "error_message"):
+        setattr(run, field, None)
+    setattr(run, "status", BacktestStatus.READY)
+    db.commit()
+    
+def cleanup_eod_backtest_run(db: Session, run_id: int) -> None:
+    db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
+    db.query(BacktestPositionSnapshot).filter(
+        BacktestPositionSnapshot.run_id == run_id
+    ).delete()
+    
+    db.query(BacktestPosition).filter(
+        BacktestPosition.run_id == run_id
+    ).delete()
+    
+    db.query(BacktestPortfolioPerformance).filter(
+        BacktestPortfolioPerformance.run_id == run_id
+    ).delete()
+    
+    db.commit()
+
+def run_eod_backtest(
+    db: Session,
+    run: BacktestRun,
+    df: pd.DataFrame,
+    initial_cash: float = 3000,
+    entry_every_n_days: int = 30
+) -> None:
+    cleanup_eod_backtest_run(db,run.id)
+    
+    logger.warning(f"Start backtest execution -> {df.tail()}")
+    try:
+        portfolio = Portfolio(initial_cash=initial_cash)
+        position_ids: dict[int,int] = {}
+        
+        nav_series: list[float] = []
+        return_series: list[float] = []
+        prev_nav: float | None = None
+        total_trades = 0
+
+        for i, (_, row) in enumerate(df.iterrows()):
+            date = pd.to_datetime(row["date"]).date().isoformat()
+            S = float(row["close"])
+            iv = float(row["iv"])
+            
+            new_positions_count = 0
+            closed_positions_count = 0
+            
+            # 1. update market sulle posizioni aperte
+            for position in portfolio.positions:
+                if position.is_open:
+                    position.update_market(S=S, sigma=iv, dt_years=1 / 365.0)
+                    
+            # 2. salva snapshot posizione PRIMA della chiusura
+            for position in portfolio.positions:
+                if not position.is_open:
+                    continue
+                
+                db_position_id = position_ids.get(id(position))
+                if db_position_id is None:
+                    continue
+                
+                pos_snapshot = BacktestPositionSnapshot(
+                    run_id=run.id,
+                    position_id=db_position_id,
+                    snapshot_date=date,
+                    underlying_price=S,
+                    iv=iv,
+                    position_price=position.price,
+                    position_pnl=position.pnl,
+                    position_delta=position.delta,
+                    position_gamma=position.gamma,
+                    position_theta=position.theta,
+                    position_vega=position.vega,
+                    min_dte=min(leg.state.T for leg in position.legs),
+                    is_open=position.is_open,
+                )
+                db.add(pos_snapshot)
+
+            # 3. close logic
+            for position in portfolio.positions:
+                if position.is_open and should_close_position(position):
+                    logger.warning(f"close position: {position.name} {position.opened_at}")
+                    portfolio.close_position(position)
+                    closed_positions_count += 1
+                    
+                db_position_id = position_ids.get(id(position))
+                if db_position_id is not None:
+                    db_position = db.get(BacktestPosition,db_position_id)
+                    if db_position:
+                        db_position.status = "CLOSED"
+                        db_position.closed_at = date
+                        db_position.close_value = position.price
+                        db_position.realized_pnl = position.pnl
+
+            portfolio.remove_closed_positions()
+
+            # 4. entry logic
+            if i % entry_every_n_days == 0:
+                new_position = create_bull_put_spread(
+                    date=date,
+                    S=S,
+                    iv=iv,
+                    dte_days=45,
+                    quantity=1,
+                )
+                logger.warning(f"open position: {new_position.name} {new_position.opened_at}")
+                portfolio.open_position(new_position)
+                new_positions_count += 1
+                
+                db_position = BacktestPosition(
+                    run_id=run.id,
+                    position_type=new_position.name,
+                    status="OPEN",
+                    opened_at=date,
+                    entry_underlying=S,
+                    entry_iv=iv,
+                    entry_macro_regime=None,
+                    initial_value=new_position.initial_value,
+                )
+                db.add(db_position)
+                db.flush() # serve per ottenere db_position.id
+                
+                position_ids[id(new_position)] = db_position.id
+                total_trades += 1
+
+            # # 5. salva performance portfolio
+            positions_value = portfolio.positions_value()
+            total_equity = portfolio.total_equity
+            
+            perf = BacktestPortfolioPerformance(
+                run_id=run.id,
+                snapshot_date=date,
+                cash=portfolio.cash,
+                positions_value=positions_value,
+                total_equity=total_equity,
+                realized_pnl=0.0, # TODO: migliorare
+                total_delta=portfolio.total_delta,
+                total_gamma=portfolio.total_gamma,
+                total_theta=portfolio.total_theta,
+                total_vega=portfolio.total_vega,
+                open_positions_count=len([p for p in portfolio.positions if p.is_open]),
+                closed_positions_count=closed_positions_count,
+                new_positions_count=new_positions_count,
+                underlying_price=S,
+                iv=iv,
+            )
+            db.add(perf)
+            
+            period_return = 0.0 if prev_nav in (None, 0) else (total_equity / prev_nav) - 1.0
+
+            perf_summary = BacktestPerformance(
+                run_id=run.id,
+                date=date,
+                nav=total_equity,
+                period_return=period_return,  
+            )
+            db.add(perf_summary)
+
+            nav_series.append(total_equity)
+            return_series.append(period_return)
+            prev_nav = total_equity
+
+        # successo
+        metrics = compute_run_eod_metrics(nav_series, return_series)
+        
+        run.cagr = metrics["cagr"]
+        run.volatility = metrics["volatility"]
+        run.sharpe = metrics["sharpe"]
+        run.max_drawdown = metrics["max_drawdown"]
+        run.win_rate = metrics["win_rate"]
+        run.profit_factor = metrics["profit_factor"]
+        run.n_trades = total_trades
+        run.error_message = None
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        run.error_message = str(e)
+        db.commit()
+        raise
+        
+
+
+def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
+    params = db.query(BacktestRunParameter).filter(BacktestRunParameter.run_id == run.id).all()
+    if not params:
+        run.error_message = "Undefined params for backtest"
+        db.commit()
+        raise HTTPException(status_code=404, detail="Undefined params for backtest")
+    params_dict = {p.key: p.value for p in params}
+    
+    if not params_dict.get("symbol") or not params_dict.get("initial_capital"):
+        run.error_message = "Undefined params initial_capital for backtest"
+        db.commit()
+        raise HTTPException(status_code=400, detail="Undefined params initial_capital for backtest")
+
+    data = db.query(MarketPrice).filter(
+               MarketPrice.symbol == params_dict.get("symbol"),
+               MarketPrice.date >= run.start_date,
+               MarketPrice.date <= run.end_date
+            ).all()
+    rows = [
+        {
+            "symbol": x.symbol,
+            "date": x.date,
+            "close": x.close,
+        }
+        for x in data
+    ]
+    df = pd.DataFrame(rows, columns=["symbol", "date","close"])
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.reset_index(drop=True)
+    # fisso una volatilità costante -> TODO: cambia con una reale
+    df["iv"] = 0.25
+    
+    logger.warning(f"anteprima -> {df.tail()}")
+    value = params_dict.get("initial_capital")
+    initial_capital = float(value) if value is not None else 0.0
+    days = params_dict.get("entry_every_n_days")
+    entry_every_n_days = int(days) if days is not None else 30
+    run_eod_backtest(db, run, df, initial_cash=initial_capital, entry_every_n_days=entry_every_n_days)
 
 
 def run_in_background(run_id: int) -> None:
+    logger.warning(f"run_in_background {run_id}")
     """Entry point per il thread background. Crea la propria sessione DB."""
-    from app.db.session import SessionLocal
     db = SessionLocal()
     try:
         run = db.query(BacktestRun).filter(BacktestRun.id == run_id).first()
-        if run:
-            execute_backtest(db, run)
+        
+        if not run:
+            raise HTTPException(status_code=404, detail="Backtest not fount")
+        
+        if run.frequency == BacktestFrequency.EOM:
+            execute_eom_backtest(db, run)
+        elif run.frequency == BacktestFrequency.EOD:
+            execute_eod_backtest(db, run)
+        else:
+            raise HTTPException(status_code=400, detail="Backtest not yet implemented") 
     except Exception as e:
         print(f"[RUN {run_id}] Background error: {e}")
     finally:
         db.close()
+        

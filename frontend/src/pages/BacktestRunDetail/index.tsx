@@ -13,7 +13,6 @@ import {
 	Skeleton,
 	Statistic,
 	Table,
-	Tabs,
 } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
@@ -38,19 +37,24 @@ import {
 	stopRunRequest,
 	updateRunRequest,
 	invalidateRunRequest,
-} from "../features/backtest/reducer";
-import type { RootState } from "../store/reducers";
-import Chart from "../components/charts/Chart";
+	fetchPortfolioPerformanceRequest,
+} from "../../features/backtest/reducer";
+import type { RootState } from "../../store/reducers";
+import Chart from "../../components/charts/Chart";
 
-import { getRunNavApi } from "../services/backtest-service";
+import { getRunNavApi } from "../../services/backtest-service";
 import {
-	AdjustmentDto,
 	BacktestStatus,
 	FrequencyType,
 	InitialAllocation,
 	RunWeightDto,
-} from "../features/backtest/types";
-import { capitalize } from "../utils/string";
+} from "../../features/backtest/types";
+import { capitalize, fmt } from "../../utils/string";
+import RegimeAdjustmentsCard from "./Long/RegimeAdjustmentCard";
+import StartingAllocation from "./Long/StartingAllocation";
+import Metrics from "./Metrics";
+import AllocationTable from "./Long/AllocationTable";
+import PortfolioPerformanceTable from "./Short/PortfolioPerformanceTable";
 
 const STATUS_BADGE: Record<
 	BacktestStatus,
@@ -66,209 +70,6 @@ const STATUS_BADGE: Record<
 	STOPPED: { status: "warning", text: "Stopped" },
 };
 
-const REGIME_COLOR: Record<string, string> = {
-	expansion: "text-green-600",
-	contraction: "text-red-500",
-	neutral: "text-gray-400",
-};
-
-const ASSETS = ["Equity", "Bond", "Commodities", "Cash"] as const;
-type AssetName = (typeof ASSETS)[number];
-
-type PivotRow = {
-	date: string;
-	pillar_scores: Record<string, string | number> | null; // pillar → regime (new) or score float (old)
-} & Record<AssetName, number | undefined>;
-
-function pivotWeights(weights: RunWeightDto[]): PivotRow[] {
-	const byDate = new Map<string, PivotRow>();
-	for (const w of weights) {
-		if (!byDate.has(w.date)) {
-			byDate.set(w.date, {
-				date: w.date,
-				pillar_scores: w.pillar_scores ? JSON.parse(w.pillar_scores) : null,
-			} as PivotRow);
-		}
-		const row = byDate.get(w.date)!;
-		(row as any)[w.asset] = w.weight;
-	}
-	return Array.from(byDate.values()).sort((a, b) =>
-		a.date.localeCompare(b.date)
-	);
-}
-
-function WeightCell({
-	value,
-	prev,
-}: {
-	value: number | undefined;
-	prev: number | undefined;
-}) {
-	if (value == null) return <span className="text-gray-400">—</span>;
-	const pct = `${(value * 100).toFixed(1)}%`;
-	if (prev == null) return <span>{pct}</span>;
-	const delta = value - prev;
-	const absDelta = `${(Math.abs(delta) * 100).toFixed(1)}%`;
-	if (Math.abs(delta) < 0.0001)
-		return (
-			<span>
-				{pct} <span className="text-gray-400 text-xs">(=)</span>
-			</span>
-		);
-	return (
-		<span>
-			{pct}{" "}
-			<span
-				className={`text-xs ${delta > 0 ? "text-green-600" : "text-red-500"}`}
-			>
-				({delta > 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />} {absDelta})
-			</span>
-		</span>
-	);
-}
-
-function RegimesCell({ row }: { row: PivotRow }) {
-	if (!row.pillar_scores) return <span className="text-gray-400">—</span>;
-	return (
-		<span className="text-xs flex flex-wrap gap-x-2">
-			{Object.entries(row.pillar_scores).map(([pillar, regime]) => {
-				const isStr = typeof regime === "string";
-				const label = isStr
-					? (regime as string).slice(0, 3)
-					: (regime as number).toFixed(2);
-				const colorKey = isStr ? (regime as string) : "";
-				return (
-					<span
-						key={pillar}
-						className={REGIME_COLOR[colorKey] ?? "text-gray-400"}
-					>
-						{pillar[0]}={label}
-					</span>
-				);
-			})}
-		</span>
-	);
-}
-
-const PILLARS = ["Growth", "Inflation", "Policy", "Risk"] as const;
-const REGIMES = ["expansion", "contraction"] as const;
-
-function RegimeAdjustmentsCard({
-	adjustments,
-	neutral,
-}: {
-	adjustments: AdjustmentDto[];
-	neutral: Record<string, number>;
-}) {
-	const assets = Object.keys(neutral);
-
-	const tabItems = REGIMES.map((regime) => {
-		const byPillarAsset: Record<string, Record<string, number>> = {};
-		for (const p of PILLARS) {
-			byPillarAsset[p] = {};
-			for (const a of assets) byPillarAsset[p][a] = 0;
-		}
-		for (const adj of adjustments) {
-			if (adj.regime === regime) {
-				if (!byPillarAsset[adj.pillar]) byPillarAsset[adj.pillar] = {};
-				byPillarAsset[adj.pillar][adj.asset] = adj.delta;
-			}
-		}
-
-		const rows = PILLARS.map((p) => ({ pillar: p, ...byPillarAsset[p] }));
-
-		const columns: ColumnsType<(typeof rows)[0]> = [
-			{ title: "Pillar", dataIndex: "pillar", key: "pillar", width: 100 },
-			...assets.map((asset) => ({
-				title: asset,
-				key: asset,
-				width: 110,
-				render: (_: unknown, row: (typeof rows)[0]) => {
-					const v: number = (row as any)[asset] ?? 0;
-					const color =
-						v > 0 ? "text-green-600" : v < 0 ? "text-red-500" : "text-gray-400";
-					return (
-						<span className={`font-mono text-xs ${color}`}>
-							{v !== 0 ? `${v > 0 ? "+" : ""}${(v * 100).toFixed(0)}%` : "—"}
-						</span>
-					);
-				},
-			})),
-			{
-				title: "Σ delta",
-				key: "sum",
-				width: 80,
-				render: (_: unknown, row: (typeof rows)[0]) => {
-					const sum = assets.reduce(
-						(acc, a) => acc + ((row as any)[a] ?? 0),
-						0
-					);
-					const color =
-						Math.abs(sum) < 0.001
-							? "text-gray-400"
-							: "text-amber-600 font-semibold";
-					return (
-						<span className={`font-mono text-xs ${color}`}>
-							{sum > 0 ? "+" : ""}
-							{(sum * 100).toFixed(0)}%
-						</span>
-					);
-				},
-			},
-		];
-
-		return {
-			key: regime,
-			label: regime.charAt(0).toUpperCase() + regime.slice(1),
-			children: (
-				<Table
-					rowKey="pillar"
-					size="small"
-					columns={columns}
-					dataSource={rows}
-					pagination={false}
-				/>
-			),
-		};
-	});
-
-	return (
-		<Card size="small" title="Allocation adjustments by regime">
-			<Tabs size="small" items={tabItems} />
-		</Card>
-	);
-}
-
-function buildAllocationColumns(rows: PivotRow[]): ColumnsType<PivotRow> {
-	return [
-		{ title: "Date", dataIndex: "date", key: "date", width: 110 },
-		{
-			title: "Regimes",
-			key: "pillar_scores",
-			width: 160,
-			render: (_: unknown, row: PivotRow) => <RegimesCell row={row} />,
-		},
-		...ASSETS.map((asset) => ({
-			title: asset,
-			key: asset,
-			render: (_: unknown, row: PivotRow) => {
-				const idx = rows.indexOf(row);
-				const prev = idx > 0 ? rows[idx - 1][asset] : undefined;
-				return <WeightCell value={row[asset]} prev={prev} />;
-			},
-		})),
-	];
-}
-
-function fmt(
-	v: number | null | undefined,
-	percent = false,
-	decimals = 2
-): string {
-	if (v == null) return "—";
-	return percent ? `${(v * 100).toFixed(decimals)}%` : v.toFixed(decimals);
-}
-
 export default function BacktestRunDetail() {
 	const { id, runId } = useParams<{ id: string; runId: string }>();
 	const backtestId = Number(id);
@@ -280,8 +81,6 @@ export default function BacktestRunDetail() {
 		current: currentBacktest,
 		currentRun,
 		currentRunLoading,
-		runWeights,
-		runWeightsLoading,
 		executingRunId,
 		invalidatingRunId,
 		backtestConfig,
@@ -293,7 +92,6 @@ export default function BacktestRunDetail() {
 	useEffect(() => {
 		dispatch(fetchBacktestRequest(backtestId));
 		dispatch(fetchRunDetailRequest({ backtestId, runId: runIdNum }));
-		dispatch(fetchRunWeightsRequest({ backtestId, runId: runIdNum }));
 		dispatch(fetchBacktestConfigRequest(backtestId));
 	}, [backtestId, runIdNum, dispatch]);
 
@@ -303,6 +101,21 @@ export default function BacktestRunDetail() {
 			.then(setNavData)
 			.catch(() => {});
 	}, [currentRun?.updated_at, backtestId, runIdNum]);
+
+	useEffect(() => {
+		if (currentBacktest?.frequency === FrequencyType.EOM) {
+			dispatch(fetchRunWeightsRequest({ backtestId, runId: runIdNum }));
+		}
+
+		if (currentBacktest?.frequency === FrequencyType.EOD) {
+			dispatch(
+				fetchPortfolioPerformanceRequest({
+					backtestId,
+					runId: runIdNum,
+				})
+			);
+		}
+	}, [currentBacktest, runIdNum, backtestId, dispatch]);
 
 	const handleExecute = () => {
 		dispatch(executeRunRequest({ backtestId, runId: runIdNum }));
@@ -723,97 +536,25 @@ export default function BacktestRunDetail() {
 											}
 										)}
 
-									{currentRun?.parameters &&
-									currentBacktest?.frequency === "EOM" &&
-									(draft?.initial_allocation ??
-										currentRun.parameters.initial_allocation) === "neutral" ? (
-										backtestConfig && (
-											<div className="col-span-2 pt-3 border-t border-gray-100">
-												<span className="text-gray-500 text-xs uppercase tracking-wide block mb-2">
-													Portafoglio neutro
-												</span>
-												<div className="flex gap-6">
-													{backtestConfig?.neutral &&
-														Object.entries(backtestConfig.neutral).map(
-															([asset, w]) => (
-																<div key={asset} className="text-sm">
-																	<span className="font-medium">{asset}</span>
-																	<div className="font-mono text-gray-700">
-																		{(w * 100).toFixed(0)}%
-																	</div>
-																</div>
-															)
-														)}
-												</div>
-											</div>
-										)
-									) : currentBacktest?.frequency === "EOM" &&
-									  (draft?.initial_allocation ??
-											currentRun.parameters.initial_allocation) !==
-											"neutral" ? (
-										<div className="col-span-2 pt-3 border-t border-gray-100">
-											<span className="text-gray-400 text-xs">
-												L'allocazione iniziale sarà il target calcolato al primo
-												mese disponibile. Visibile dopo l'esecuzione.
-											</span>
-										</div>
-									) : null}
+									{currentBacktest?.frequency === "EOM" && (
+										<StartingAllocation draft={draft} />
+									)}
 								</div>
 							</div>
 						</div>
 					</Card>
 
 					{/* Regime adjustments */}
-					{backtestConfig?.adjustments && (
-						<RegimeAdjustmentsCard
-							adjustments={backtestConfig.adjustments}
-							neutral={backtestConfig.neutral}
-						/>
-					)}
+					{currentBacktest?.frequency === "EOM" &&
+						backtestConfig?.adjustments && (
+							<RegimeAdjustmentsCard
+								adjustments={backtestConfig.adjustments}
+								neutral={backtestConfig.neutral}
+							/>
+						)}
 
 					{/* Metrics */}
-					<div className="grid grid-cols-4 gap-4">
-						<Card size="small">
-							<Statistic
-								title="CAGR"
-								value={fmt(currentRun.cagr, true)}
-								valueStyle={{
-									color: (currentRun.cagr ?? 0) >= 0 ? "#3f8600" : "#cf1322",
-								}}
-							/>
-						</Card>
-						<Card size="small">
-							<Statistic title="Sharpe Ratio" value={fmt(currentRun.sharpe)} />
-						</Card>
-						<Card size="small">
-							<Statistic
-								title="Volatility"
-								value={fmt(currentRun.volatility, true)}
-							/>
-						</Card>
-						<Card size="small">
-							<Statistic
-								title="Max Drawdown"
-								value={fmt(currentRun.max_drawdown, true)}
-								valueStyle={{ color: "#cf1322" }}
-							/>
-						</Card>
-						<Card size="small">
-							<Statistic
-								title="Win Rate"
-								value={fmt(currentRun.win_rate, true)}
-							/>
-						</Card>
-						<Card size="small">
-							<Statistic
-								title="Profit Factor"
-								value={fmt(currentRun.profit_factor)}
-							/>
-						</Card>
-						<Card size="small">
-							<Statistic title="N. trade" value={currentRun.n_trades ?? "—"} />
-						</Card>
-					</div>
+					{currentRun && <Metrics currentRun={currentRun} />}
 
 					{/* NAV chart */}
 					{navData.length > 0 && (
@@ -839,29 +580,12 @@ export default function BacktestRunDetail() {
 					)}
 
 					{/* Allocation weights table */}
-					<Card size="small" title="Allocations">
-						{(() => {
-							const rows = pivotWeights(runWeights);
-							return (
-								<Table
-									rowKey="date"
-									size="small"
-									columns={buildAllocationColumns(rows)}
-									dataSource={rows}
-									loading={runWeightsLoading}
-									pagination={{
-										pageSize: 20,
-										showTotal: (t) => `${t} records`,
-									}}
-									locale={{
-										emptyText: isDone
-											? "No allocation data"
-											: "Run the backtest to see allocations",
-									}}
-								/>
-							);
-						})()}
-					</Card>
+					{currentBacktest?.frequency === "EOM" && <AllocationTable />}
+
+					{/* Portfolio performances table */}
+					{currentBacktest?.frequency === "EOD" && (
+						<PortfolioPerformanceTable />
+					)}
 				</>
 			)}
 		</div>

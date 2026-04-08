@@ -157,7 +157,7 @@ def max_sharpe_portfolio(returns_df: pd.DataFrame, assets: list[str],
     cov = ret.cov().values          # matrice di covarianza mensile
 
     def neg_sharpe(w):
-        port_ret = np.dot(w, mu) - RISK_FREE_MONTHLY
+        port_ret = np.dot(w, mu) - RISK_FREE_MONTHLY 
         port_vol = np.sqrt(np.dot(w, np.dot(cov, w)))
         if port_vol < 1e-10:
             return 0.0
@@ -196,8 +196,8 @@ def portfolio_stats(weights: dict[str, float], returns_df: pd.DataFrame, assets:
     return {"CAGR": ann_ret, "Vol": ann_vol, "Sharpe": sharpe, "MaxDD": max_dd, "N": len(port_ret)}
 
 
-def _max_drawdown(monthly_returns: np.ndarray) -> float:
-    nav = np.cumprod(1 + monthly_returns)
+def _max_drawdown(period_returns: np.ndarray) -> float:
+    nav = np.cumprod(1 + period_returns)
     peak = np.maximum.accumulate(nav)
     dd = (nav - peak) / peak
     return float(dd.min())

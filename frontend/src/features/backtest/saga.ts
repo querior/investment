@@ -16,6 +16,7 @@ import {
 	getBacktestConfigApi,
 	invalidateRunApi,
 	cloneRunApi,
+	getPortfolioPerformancesApi,
 } from "../../services/backtest-service";
 import {
 	fetchBacktestsRequest,
@@ -59,6 +60,9 @@ import {
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
 	fetchRunWeightsFailure,
+	fetchPortfolioPerformanceRequest,
+	fetchPortfolioPerformanceSuccess,
+	fetchPortfolioPerformanceFailure,
 	fetchBacktestConfigRequest,
 	fetchBacktestConfigSuccess,
 	fetchBacktestConfigFailure,
@@ -284,6 +288,28 @@ function* fetchBacktestConfigEffect(
 	}
 }
 
+function* fetchPortfolioPerformancesEffect(
+	action: ReturnType<typeof fetchPortfolioPerformanceRequest>
+): any {
+	const { backtestId, runId, page = 1, limit = 20 } = action.payload;
+	try {
+		const data = yield call(
+			getPortfolioPerformancesApi,
+			backtestId,
+			runId,
+			page,
+			limit
+		);
+		yield put(fetchPortfolioPerformanceSuccess(data));
+	} catch (e: any) {
+		yield put(
+			fetchPortfolioPerformanceFailure(
+				e?.response?.data?.detail ?? "Failed to load portfolio performances"
+			)
+		);
+	}
+}
+
 export function* backtestWatcher() {
 	yield takeLatest(fetchBacktestsRequest.type, fetchBacktestsEffect);
 	yield takeLatest(fetchBacktestRequest.type, fetchBacktestEffect);
@@ -300,5 +326,6 @@ export function* backtestWatcher() {
 	yield takeLatest(invalidateRunRequest.type, invalidateRunEffect);
 	yield takeLatest(fetchRunDetailRequest.type, fetchRunDetailEffect);
 	yield takeLatest(fetchRunWeightsRequest.type, fetchRunWeightsEffect);
+	yield takeLatest(fetchPortfolioPerformanceRequest.type, fetchPortfolioPerformancesEffect);
 	yield takeLatest(fetchBacktestConfigRequest.type, fetchBacktestConfigEffect);
 }

@@ -12,6 +12,7 @@ from app.services.config_repo import get_neutral_allocation, get_allocation_para
 from app.db.backtest_parameter import BacktestParameter
 from app.db.allocation_adjustment import AllocationAdjustment
 from app.backtest.schemas.backtest_performance import BacktestPerformance
+from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
 from app.backtest.schemas.backtest_run import BacktestFrequency, BacktestRun, BacktestStatus, BacktestInstrument
 from app.backtest.schemas.backtest_weight import BacktestWeight
 from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
@@ -241,7 +242,6 @@ def list_runs(backtest_id: int, db: Session = Depends(get_db)):
         .all()
     )
     serialized = [_serialize_run(r, db) for r in runs]
-    logger.warning(f"serialized {serialized}")
     return serialized
 
 
@@ -251,7 +251,7 @@ def _upsert_run_parameter(db: Session, run_id: int, key: str, value: str) -> Non
         BacktestRunParameter.key == key,
     ).first()
     if row:
-        row.value = value  # type: ignore[assignment]
+        row.value = value  
     else:
         db.add(BacktestRunParameter(run_id=run_id, key=key, value=value))
 
@@ -287,6 +287,7 @@ def create_run(backtest_id: int, req: CreateRunRequest, db: Session = Depends(ge
         _upsert_run_parameter(db, run_id, "symbol", "IWM")
         _upsert_run_parameter(db, run_id, "max_risk", "5")
         _upsert_run_parameter(db, run_id, "initial_capital", "10000")
+        _upsert_run_parameter(db, run_id, "entry_every_n_days", "30")
         
     db.commit()
     db.refresh(run)
@@ -354,10 +355,9 @@ def delete_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
 def execute_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     run = _get_run_or_404(backtest_id, run_id, db)
     bt = _get_backtest_or_404(backtest_id, db)
-
-    if bt.frequency != BacktestFrequency.EOM:
+    if bt.frequency != BacktestFrequency.EOM and bt.frequency != BacktestFrequency.EOD:
         run.status = BacktestStatus.ERROR 
-        run.error_message = f"Backtest execution not yet implemented for frequency {bt.frequency}"  # type: ignore[assignment]
+        run.error_message = f"***Backtest execution not yet implemented for frequency {bt.frequency}"  # type: ignore[assignment]
         db.commit()
         return {"id": run_id, "status": BacktestStatus.ERROR}
 
@@ -365,6 +365,9 @@ def execute_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Run already in progress")
     if run.end_date > date_type.today():  # type: ignore[operator]
         raise HTTPException(status_code=400, detail="end_date cannot be in the future")
+    # clear error
+    run.error_message = ""
+    db.commit()
     Thread(target=run_in_background, args=(cast(int, run.id),), daemon=True).start()
     return {"id": run_id, "status": BacktestStatus.RUNNING}
 
@@ -412,7 +415,7 @@ def run_nav(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         {
             "date": r.date,
             "nav": cast(float, r.nav),
-            "monthly_return": cast(float, r.monthly_return),
+            "period_return": cast(float, r.period_return),
         }
         for r in rows
     ]
@@ -426,10 +429,10 @@ def invalidate_run(backtest_id: int, run_id: int, db: Session = Depends(get_db))
     db.query(BacktestWeight).filter(BacktestWeight.run_id == run_id).delete()
     db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
     db.query(AllocationHistory).filter(AllocationHistory.run_id == run_id).delete()
-    r = cast(object, run)
+    
     for field in ("cagr", "volatility", "sharpe", "max_drawdown", "win_rate", "profit_factor", "n_trades", "config_snapshot", "error_message"):
-        setattr(r, field, None)
-    setattr(r, "status", BacktestStatus.READY)
+        setattr(run, field, None)
+    setattr(run, "status", BacktestStatus.READY)
     db.commit()
     return {"id": run_id, "status": BacktestStatus.READY}
 
@@ -443,4 +446,48 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         "volatility": run.volatility,
         "sharpe": run.sharpe,
         "max_drawdown": run.max_drawdown,
+    }
+
+
+@router.get("/backtests/{backtest_id}/runs/{run_id}/performances")
+def run_portfolio_performances(backtest_id: int, run_id: int, page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
+    _get_run_or_404(backtest_id, run_id, db)
+    total = (
+        db.query(BacktestPortfolioPerformance)
+        .filter(BacktestPortfolioPerformance.run_id == run_id)
+        .count()
+    )
+    rows = (
+        db.query(BacktestPortfolioPerformance)
+        .filter(BacktestPortfolioPerformance.run_id == run_id)
+        .order_by(BacktestPortfolioPerformance.snapshot_date)
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "snapshot_date": r.snapshot_date,
+                "cash": r.cash,
+                "positions_value": r.positions_value,
+                "total_equity": r.total_equity,
+                "realized_pnl": r.realized_pnl,
+                "unrealized_pnl": r.unrealized_pnl,
+                "total_pnl": r.total_pnl,
+                "total_delta": r.total_delta,
+                "total_gamma": r.total_gamma,
+                "total_theta": r.total_theta,
+                "total_vega": r.total_vega,
+                "open_positions_count": r.open_positions_count,
+                "closed_positions_count": r.closed_positions_count,
+                "new_positions_count": r.new_positions_count,
+                "underlying_price": r.underlying_price,
+                "iv": r.iv,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
     }

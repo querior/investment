@@ -1,7 +1,12 @@
 import enum
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import Boolean, Integer, String, Date, DateTime, Float, Enum, ForeignKey, func
+from typing import TYPE_CHECKING
 from app.db.session import Base
+
+if TYPE_CHECKING:
+    from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
+    from app.backtest.schemas.backtest_position import BacktestPosition
 
 
 class BacktestInstrument(str, enum.Enum):
@@ -48,3 +53,16 @@ class BacktestRun(Base):
     win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     profit_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
     n_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    
+    positions: Mapped[list["BacktestPosition"]] = relationship(
+        "BacktestPosition",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+    portfolio_performances: Mapped[list["BacktestPortfolioPerformance"]] = relationship(
+        "BacktestPortfolioPerformance",
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="BacktestPortfolioPerformance.snapshot_date",
+    )

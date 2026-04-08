@@ -2,6 +2,7 @@ import type {
 	BacktestConfigDto,
 	BacktestDto,
 	BacktestListResponse,
+	BacktestPortfolioPerformanceDto,
 	BacktestRunDto,
 	BacktestStatus,
 	CreateBacktestPayload,
@@ -126,7 +127,7 @@ export const cloneRunApi = async (
 export const getRunNavApi = async (
 	backtestId: number,
 	runId: number
-): Promise<{ date: string; nav: number; monthly_return: number }[]> => {
+): Promise<{ date: string; nav: number; period_return: number }[]> => {
 	const res = await api.get(`/backtests/${backtestId}/runs/${runId}/nav`);
 	return res.data;
 };
@@ -136,5 +137,23 @@ export const getRunWeightsApi = async (
 	runId: number
 ): Promise<RunWeightDto[]> => {
 	const res = await api.get(`/backtests/${backtestId}/runs/${runId}/weights`);
+	return res.data;
+};
+
+export const getPortfolioPerformancesApi = async (
+	backtestId: number,
+	runId: number,
+	page = 1,
+	limit = 20
+): Promise<{
+	items: BacktestPortfolioPerformanceDto[];
+	total: number;
+	page: number;
+	limit: number;
+}> => {
+	const res = await api.get(
+		`/backtests/${backtestId}/runs/${runId}/performances`,
+		{ params: { page, limit } }
+	);
 	return res.data;
 };

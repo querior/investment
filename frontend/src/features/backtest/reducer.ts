@@ -2,10 +2,12 @@ import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import type {
 	BacktestConfigDto,
 	BacktestDto,
+	BacktestPortfolioPerformanceDto,
 	BacktestRunDto,
 	BacktestState,
 	CreateBacktestPayload,
 	CreateRunPayload,
+	PortfolioPerformanceState,
 	RunWeightDto,
 } from "./types";
 
@@ -29,6 +31,12 @@ const initialState: BacktestState = {
 	currentRunLoading: false,
 	runWeights: [],
 	runWeightsLoading: false,
+	portfolioPerformances: {
+		items: [],
+		page: 1,
+		page_size: 20,
+		total: 0,
+	},
 	backtestConfig: null,
 	backtestConfigLoading: false,
 };
@@ -227,6 +235,38 @@ const slice = createSlice({
 		fetchRunWeightsFailure(state, action: PayloadAction<string>) {
 			state.runWeightsLoading = false;
 		},
+		// --- portfolio performance ---
+		fetchPortfolioPerformanceRequest(
+			state,
+			_action: PayloadAction<{
+				backtestId: number;
+				runId: number;
+				page?: number;
+				limit?: number;
+			}>
+		) {
+			state.loading = true;
+		},
+		fetchPortfolioPerformanceSuccess(
+			state,
+			action: PayloadAction<{
+				items: BacktestPortfolioPerformanceDto[];
+				total: number;
+				page: number;
+				limit: number;
+			}>
+		) {
+			state.loading = false;
+			state.portfolioPerformances = {
+				items: action.payload.items,
+				page: action.payload.page,
+				page_size: action.payload.limit,
+				total: action.payload.total,
+			};
+		},
+		fetchPortfolioPerformanceFailure(state, action: PayloadAction<string>) {
+			state.loading = false;
+		},
 		// --- backtest config ---
 		fetchBacktestConfigRequest(state, _action: PayloadAction<number>) {
 			state.backtestConfigLoading = true;
@@ -343,6 +383,9 @@ export const {
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
 	fetchRunWeightsFailure,
+	fetchPortfolioPerformanceRequest,
+	fetchPortfolioPerformanceSuccess,
+	fetchPortfolioPerformanceFailure,
 	fetchBacktestConfigRequest,
 	fetchBacktestConfigSuccess,
 	fetchBacktestConfigFailure,
