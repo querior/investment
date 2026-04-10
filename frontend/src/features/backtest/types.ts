@@ -20,6 +20,11 @@ export type BacktestDto = {
 export type InitialAllocation = "target" | "neutral";
 export type Instrument = "options" | "futures";
 
+export type RunParameter = {
+	value: string;
+	unit: string;
+};
+
 export type BacktestRunDto = {
 	id: number;
 	backtest_id: number;
@@ -40,7 +45,7 @@ export type BacktestRunDto = {
 	n_trades: number | null;
 	created_at: string;
 	updated_at: string;
-	parameters: Record<string, string>;
+	parameters: Record<string, RunParameter>;
 };
 
 export type BacktestListResponse = {
@@ -109,8 +114,49 @@ export type BacktestPortfolioPerformanceDto = {
 	iv: number;
 };
 
+export type BacktestPositionDto = {
+	id: number;
+	position_type: string;
+	strategy_name: string | null;
+	strategy_acronym: string | null;
+	strategy_color: string;
+	status: string;
+	opened_at: string;
+	closed_at: string | null;
+	entry_underlying: number;
+	entry_iv: number;
+	entry_macro_regime: string | null;
+	initial_value: number;
+	close_value: number | null;
+	realized_pnl: number | null;
+	unrealized_pnl: number | null;
+	performance_pct: number | null;
+	days_in_trade: number;
+};
+
+export type BacktestPositionHistoryDto = {
+	snapshot_date: string;
+	underlying_price: number;
+	iv: number;
+	position_price: number;
+	position_pnl: number;
+	position_delta: number;
+	position_gamma: number;
+	position_theta: number;
+	position_vega: number;
+	min_dte: number;
+	is_open: boolean;
+};
+
 export type PortfolioPerformanceState = {
 	items: BacktestPortfolioPerformanceDto[];
+	page: number;
+	page_size: number;
+	total: number;
+};
+
+export type PositionsState = {
+	items: BacktestPositionDto[];
 	page: number;
 	page_size: number;
 	total: number;
@@ -143,6 +189,7 @@ export type BacktestState = {
 	runWeights: RunWeightDto[];
 	runWeightsLoading: boolean;
 	portfolioPerformances: PortfolioPerformanceState;
+	positions: PositionsState;
 	// backtest config
 	backtestConfig: BacktestConfigDto | null;
 	backtestConfigLoading: boolean;

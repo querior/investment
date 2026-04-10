@@ -1,3 +1,4 @@
+from sqlalchemy import extract
 from sqlalchemy.orm import Session
 from app.db.macro_processed import MacroProcessed
 from app.db.macro_regimes import MacroRegime
@@ -156,3 +157,38 @@ def compute_pillars(
       }
 
   db.commit()
+
+
+REGIME_SCORE = {"expansion": 1.0, "neutral": 0.0, "contraction": -1.0}
+
+
+def compute_macro_risk_score(db: Session, date) -> tuple[float, str]:
+    """
+    Aggrega i regimi dei 4 pillar in un punteggio tra -1 e 1.
+    expansion=+1, neutral=0, contraction=-1 → media semplice.
+    score >= 0.5  → RISK_ON
+    score <= -0.5 → RISK_OFF
+    altrimenti    → NEUTRAL
+
+    Il confronto è per mese: qualunque giorno di maggio 2026 restituisce
+    il regime di maggio 2026.
+    """
+    regimes = (
+        db.query(MacroRegime)
+        .filter(extract("year", MacroRegime.date) == date.year)
+        .filter(extract("month", MacroRegime.date) == date.month)
+        .all()
+    )
+    if not regimes:
+        return 0.0, "NEUTRAL"
+
+    score = sum(REGIME_SCORE.get(r.regime, 0.0) for r in regimes) / len(regimes)
+
+    if score >= 0.5:
+        label = "RISK_ON"
+    elif score <= -0.5:
+        label = "RISK_OFF"
+    else:
+        label = "NEUTRAL"
+
+    return score, label

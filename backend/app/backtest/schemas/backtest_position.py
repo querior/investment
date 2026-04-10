@@ -8,6 +8,7 @@ from app.db.session import Base
 if TYPE_CHECKING:
     from .backtest_run import BacktestRun
     from .backtest_position_snapshot import BacktestPositionSnapshot
+    from .option_strategy import OptionStrategy
 
 class BacktestPosition(Base):
     __tablename__ = "backtest_positions"
@@ -19,7 +20,10 @@ class BacktestPosition(Base):
         index=True,
     )
 
-    position_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    position_type: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("option_strategies.type", ondelete="SET NULL"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN")
 
     opened_at: Mapped[date] = mapped_column(Date, nullable=False)
@@ -48,6 +52,11 @@ class BacktestPosition(Base):
     run: Mapped["BacktestRun"] = relationship(
         "BacktestRun",
         back_populates="positions",
+    )
+
+    strategy: Mapped[Optional["OptionStrategy"]] = relationship(
+        "OptionStrategy",
+        foreign_keys="[BacktestPosition.position_type]",
     )
 
     snapshots: Mapped[list["BacktestPositionSnapshot"]] = relationship(

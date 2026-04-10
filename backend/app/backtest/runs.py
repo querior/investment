@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import Any, cast
 import pandas as pd
 import logging
-from app.backtest.option.strategy import create_bull_put_spread, should_close_position
+from app.backtest.domain.strategy.strategy_builder import create_bull_put_spread, should_close_position
 from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
 from app.backtest.schemas.backtest_position import BacktestPosition
 from app.backtest.schemas.backtest_position_snapshot import BacktestPositionSnapshot
@@ -27,7 +27,10 @@ from app.db.allocation_adjustment import AllocationAdjustment
 from app.db.allocation_history import AllocationHistory
 from app.db.macro_regimes import MacroRegime
 from app.backtest.metrics import compute_metrics, compute_run_eod_metrics
-from .models import Portfolio
+from .domain.models import Portfolio
+from app.signals.volatility import enrich_with_iv
+from app.backtest.domain.strategy.selectors import select_strategy
+from app.services.pillars.service import compute_macro_risk_score
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +243,18 @@ def clean_eom_backtest_run(db: Session, run_id: int):
     db.commit()
     
 def cleanup_eod_backtest_run(db: Session, run_id: int) -> None:
+    run = db.query(BacktestRun).filter(BacktestRun.id == run_id).first()    
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    run.cagr = None
+    run.sharpe = None
+    run.volatility = None
+    run.max_drawdown = None
+    run.win_rate = None
+    run.profit_factor = None
+    run.n_trades = None
+    
     db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
     db.query(BacktestPositionSnapshot).filter(
         BacktestPositionSnapshot.run_id == run_id
@@ -333,32 +348,42 @@ def run_eod_backtest(
 
             # 4. entry logic
             if i % entry_every_n_days == 0:
-                new_position = create_bull_put_spread(
-                    date=date,
-                    S=S,
-                    iv=iv,
-                    dte_days=45,
-                    quantity=1,
-                )
-                logger.warning(f"open position: {new_position.name} {new_position.opened_at}")
-                portfolio.open_position(new_position)
-                new_positions_count += 1
+                macro_score, macro_regime = compute_macro_risk_score(db, pd.to_datetime(row["date"]).date())
                 
-                db_position = BacktestPosition(
-                    run_id=run.id,
-                    position_type=new_position.name,
-                    status="OPEN",
-                    opened_at=date,
-                    entry_underlying=S,
-                    entry_iv=iv,
-                    entry_macro_regime=None,
-                    initial_value=new_position.initial_value,
-                )
-                db.add(db_position)
-                db.flush() # serve per ottenere db_position.id
+                strategy = select_strategy(iv, macro_regime)
                 
-                position_ids[id(new_position)] = db_position.id
-                total_trades += 1
+                logger.warning(f"Strategy: {strategy.name} - macro_score: {macro_score} macro_regime: {macro_regime} ")
+                
+                if strategy.should_trade:                
+                    new_position = strategy.builder(
+                        date=date,
+                        S=S,
+                        iv=iv,
+                        dte_days=45,
+                        quantity=1,
+                    )
+                    logger.warning(f"open position: {new_position.name} {new_position.opened_at} - macro_score: {macro_score} macro_regime: {macro_regime} ")
+                    portfolio.open_position(new_position)
+                    new_positions_count += 1
+                    
+                    # Converti position_type in snake_case per FK a option_strategies
+                    position_type_key = new_position.name.lower().replace(" ", "_")
+
+                    db_position = BacktestPosition(
+                        run_id=run.id,
+                        position_type=position_type_key,
+                        status="OPEN",
+                        opened_at=date,
+                        entry_underlying=S,
+                        entry_iv=iv,
+                        entry_macro_regime=None,
+                        initial_value=new_position.initial_value,
+                    )
+                    db.add(db_position)
+                    db.flush() # serve per ottenere db_position.id
+                    
+                    position_ids[id(new_position)] = db_position.id
+                    total_trades += 1
 
             # # 5. salva performance portfolio
             positions_value = portfolio.positions_value()
@@ -370,7 +395,9 @@ def run_eod_backtest(
                 cash=portfolio.cash,
                 positions_value=positions_value,
                 total_equity=total_equity,
-                realized_pnl=0.0, # TODO: migliorare
+                realized_pnl=portfolio.realized_pnl,
+                unrealized_pnl=portfolio.unrealized_pnl,
+                total_pnl=portfolio.total_pnl,
                 total_delta=portfolio.total_delta,
                 total_gamma=portfolio.total_gamma,
                 total_theta=portfolio.total_theta,
@@ -423,17 +450,30 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
         run.error_message = "Undefined params for backtest"
         db.commit()
         raise HTTPException(status_code=404, detail="Undefined params for backtest")
-    params_dict = {p.key: p.value for p in params}
+    params_dict = {
+        p.key: {
+            "value": p.value,
+            "unit": p.unit,
+        }
+        for p in params
+    }
     
-    if not params_dict.get("symbol") or not params_dict.get("initial_capital"):
+    symbol = params_dict.get("symbol")
+    symbol_str = symbol.get("value") if isinstance(symbol, dict) else symbol
+
+    if not symbol_str or not params_dict.get("initial_capital"):
         run.error_message = "Undefined params initial_capital for backtest"
         db.commit()
         raise HTTPException(status_code=400, detail="Undefined params initial_capital for backtest")
+    
+    warmup_days = 40
+    load_start = run.start_date - datetime.timedelta(days=warmup_days) # type: ignore
+    load_end = run.end_date
 
     data = db.query(MarketPrice).filter(
-               MarketPrice.symbol == params_dict.get("symbol"),
-               MarketPrice.date >= run.start_date,
-               MarketPrice.date <= run.end_date
+               MarketPrice.symbol == symbol_str,
+               MarketPrice.date >= load_start,
+               MarketPrice.date <= load_end
             ).all()
     rows = [
         {
@@ -446,14 +486,25 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
     df = pd.DataFrame(rows, columns=["symbol", "date","close"])
     df["date"] = pd.to_datetime(df["date"])
     df = df.reset_index(drop=True)
-    # fisso una volatilità costante -> TODO: cambia con una reale
-    df["iv"] = 0.25
+    # uso funzione proxy - in futuro da cambiare con surface
+    alpha_volatility = params_dict.get("alpha_volatility")
+    iv_min = params_dict.get("iv_min")
+    iv_max = params_dict.get("iv_max")    
     
-    logger.warning(f"anteprima -> {df.tail()}")
-    value = params_dict.get("initial_capital")
-    initial_capital = float(value) if value is not None else 0.0
+    df = enrich_with_iv(
+        df,
+        alpha=float(alpha_volatility["value"]) if alpha_volatility else 4.0,
+        iv_min=float(iv_min["value"]) if iv_min else 0.10,
+        iv_max=float(iv_max["value"]) if iv_max else 0.80,
+    )
+    
+    df = df[(df["date"] >= pd.Timestamp(run.start_date)) & (df["date"] <= pd.Timestamp(run.end_date))] # type: ignore
+    
+    logger.warning(f"anteprima -> {df.head()}")
+    initial_capital = params_dict.get("initial_capital")
+    initial_capital = float(initial_capital["value"]) if initial_capital else 0.0
     days = params_dict.get("entry_every_n_days")
-    entry_every_n_days = int(days) if days is not None else 30
+    entry_every_n_days = int(days["value"]) if days is not None else 30
     run_eod_backtest(db, run, df, initial_cash=initial_capital, entry_every_n_days=entry_every_n_days)
 
 

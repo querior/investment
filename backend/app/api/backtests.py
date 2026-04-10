@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from datetime import date
 from datetime import date as date_type
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from threading import Thread
 from typing import cast
 from app.db.session import SessionLocal
@@ -13,10 +13,13 @@ from app.db.backtest_parameter import BacktestParameter
 from app.db.allocation_adjustment import AllocationAdjustment
 from app.backtest.schemas.backtest_performance import BacktestPerformance
 from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
+from app.backtest.schemas.backtest_position import BacktestPosition
+from app.backtest.schemas.backtest_position_snapshot import BacktestPositionSnapshot
 from app.backtest.schemas.backtest_run import BacktestFrequency, BacktestRun, BacktestStatus, BacktestInstrument
 from app.backtest.schemas.backtest_weight import BacktestWeight
 from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
 from app.db.allocation_history import AllocationHistory
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -71,7 +74,7 @@ def _serialize_run(run: BacktestRun, db: Session) -> dict:
         "n_trades": run.n_trades,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
-        "parameters": {p.key: p.value for p in params},
+        "parameters": {p.key: {"value": p.value, "unit": p.unit} for p in params},
     }
 
 
@@ -245,15 +248,16 @@ def list_runs(backtest_id: int, db: Session = Depends(get_db)):
     return serialized
 
 
-def _upsert_run_parameter(db: Session, run_id: int, key: str, value: str) -> None:
+def _upsert_run_parameter(db: Session, run_id: int, key: str, value: str, unit: str = "value") -> None:
     row = db.query(BacktestRunParameter).filter(
         BacktestRunParameter.run_id == run_id,
         BacktestRunParameter.key == key,
     ).first()
     if row:
-        row.value = value  
+        row.value = value
+        row.unit = unit
     else:
-        db.add(BacktestRunParameter(run_id=run_id, key=key, value=value))
+        db.add(BacktestRunParameter(run_id=run_id, key=key, value=value, unit=unit))
 
 
 @router.post("/backtests/{backtest_id}/create-run", status_code=201)
@@ -284,10 +288,13 @@ def create_run(backtest_id: int, req: CreateRunRequest, db: Session = Depends(ge
         
     if (bt.frequency == BacktestFrequency.EOD or bt.frequency == BacktestFrequency.EOW) and bt.instrument == BacktestInstrument.OPTIONS.value:
         # Copy global defaults into per-run parameters
-        _upsert_run_parameter(db, run_id, "symbol", "IWM")
-        _upsert_run_parameter(db, run_id, "max_risk", "5")
-        _upsert_run_parameter(db, run_id, "initial_capital", "10000")
-        _upsert_run_parameter(db, run_id, "entry_every_n_days", "30")
+        _upsert_run_parameter(db, run_id, "symbol", "IWM", unit="value")
+        _upsert_run_parameter(db, run_id, "max_risk", "5", unit="pct")
+        _upsert_run_parameter(db, run_id, "initial_capital", "10000", unit="value")
+        _upsert_run_parameter(db, run_id, "entry_every_n_days", "30", unit="value")
+        _upsert_run_parameter(db, run_id, "alpha_volatility", "4", unit="value")
+        _upsert_run_parameter(db, run_id, "iv_min", "0.10", unit="pct")
+        _upsert_run_parameter(db, run_id, "iv_max", "0.80", unit="pct")
         
     db.commit()
     db.refresh(run)
@@ -449,45 +456,121 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/backtests/{backtest_id}/runs/{run_id}/performances")
+@router.get("/backtests/{backtest_id}/runs/{run_id}/positions")
 def run_portfolio_performances(backtest_id: int, run_id: int, page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
     _get_run_or_404(backtest_id, run_id, db)
     total = (
-        db.query(BacktestPortfolioPerformance)
-        .filter(BacktestPortfolioPerformance.run_id == run_id)
+        db.query(BacktestPosition)
+        .filter(BacktestPosition.run_id == run_id)
         .count()
     )
-    rows = (
-        db.query(BacktestPortfolioPerformance)
-        .filter(BacktestPortfolioPerformance.run_id == run_id)
-        .order_by(BacktestPortfolioPerformance.snapshot_date)
+    positions = (
+        db.query(BacktestPosition)
+        .filter(BacktestPosition.run_id == run_id)
+        .options(selectinload(BacktestPosition.strategy))
+        .order_by(BacktestPosition.opened_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
     )
+
+    items = []
+    for pos in positions:
+        # Calculate performance_pct
+        performance_pct = None
+        if pos.initial_value and pos.initial_value != 0 and pos.realized_pnl is not None:
+            performance_pct = pos.realized_pnl / abs(pos.initial_value)
+
+        # Calculate days_in_trade
+        if pos.closed_at:
+            days_in_trade = (pos.closed_at - pos.opened_at).days
+        else:
+            # Position is open: use last snapshot date or today
+            last_snapshot = (
+                db.query(BacktestPositionSnapshot)
+                .filter(BacktestPositionSnapshot.position_id == pos.id)
+                .order_by(BacktestPositionSnapshot.snapshot_date.desc())
+                .first()
+            )
+            snapshot_date = last_snapshot.snapshot_date if last_snapshot else date_type.today()
+            days_in_trade = (snapshot_date - pos.opened_at).days
+
+        # Calculate unrealized_pnl for open positions
+        unrealized_pnl = None
+        if pos.status == "OPEN":
+            last_snapshot = (
+                db.query(BacktestPositionSnapshot)
+                .filter(BacktestPositionSnapshot.position_id == pos.id)
+                .order_by(BacktestPositionSnapshot.snapshot_date.desc())
+                .first()
+            )
+            if last_snapshot:
+                unrealized_pnl = last_snapshot.position_pnl
+
+        items.append({
+            "id": pos.id,
+            "position_type": pos.position_type,
+            "strategy_name": pos.strategy.name if pos.strategy else None,
+            "strategy_acronym": pos.strategy.acronym if pos.strategy else None,
+            "strategy_color": pos.strategy.color if pos.strategy else "default",
+            "status": pos.status,
+            "opened_at": pos.opened_at,
+            "closed_at": pos.closed_at,
+            "entry_underlying": pos.entry_underlying,
+            "entry_iv": pos.entry_iv,
+            "entry_macro_regime": pos.entry_macro_regime,
+            "initial_value": pos.initial_value,
+            "close_value": pos.close_value,
+            "realized_pnl": pos.realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "performance_pct": performance_pct,
+            "days_in_trade": days_in_trade,
+        })
+
     return {
-        "items": [
-            {
-                "snapshot_date": r.snapshot_date,
-                "cash": r.cash,
-                "positions_value": r.positions_value,
-                "total_equity": r.total_equity,
-                "realized_pnl": r.realized_pnl,
-                "unrealized_pnl": r.unrealized_pnl,
-                "total_pnl": r.total_pnl,
-                "total_delta": r.total_delta,
-                "total_gamma": r.total_gamma,
-                "total_theta": r.total_theta,
-                "total_vega": r.total_vega,
-                "open_positions_count": r.open_positions_count,
-                "closed_positions_count": r.closed_positions_count,
-                "new_positions_count": r.new_positions_count,
-                "underlying_price": r.underlying_price,
-                "iv": r.iv,
-            }
-            for r in rows
-        ],
+        "items": items,
         "total": total,
         "page": page,
         "limit": limit,
     }
+
+
+@router.get("/backtests/{backtest_id}/runs/{run_id}/positions/{position_id}/history")
+def position_history(backtest_id: int, run_id: int, position_id: int, db: Session = Depends(get_db)):
+    _get_run_or_404(backtest_id, run_id, db)
+
+    # Verify position exists and belongs to this run
+    position = (
+        db.query(BacktestPosition)
+        .filter(BacktestPosition.id == position_id, BacktestPosition.run_id == run_id)
+        .first()
+    )
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    snapshots = (
+        db.query(BacktestPositionSnapshot)
+        .filter(
+            BacktestPositionSnapshot.position_id == position_id,
+            BacktestPositionSnapshot.run_id == run_id,
+        )
+        .order_by(BacktestPositionSnapshot.snapshot_date)
+        .all()
+    )
+
+    return [
+        {
+            "snapshot_date": s.snapshot_date,
+            "underlying_price": s.underlying_price,
+            "iv": s.iv,
+            "position_price": s.position_price,
+            "position_pnl": s.position_pnl,
+            "position_delta": s.position_delta,
+            "position_gamma": s.position_gamma,
+            "position_theta": s.position_theta,
+            "position_vega": s.position_vega,
+            "min_dte": s.min_dte,
+            "is_open": s.is_open,
+        }
+        for s in snapshots
+    ]

@@ -10,7 +10,7 @@ import {
 	FrequencyType,
 	Instrument,
 } from "../../features/backtest/types";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export type CreateFormValues = {
 	name: string;
@@ -38,6 +38,10 @@ const UpsertBacktestModal = ({
 	const { creating } = useSelector((state: RootState) => state.backtest);
 
 	const frequency = Form.useWatch("frequency", upsertForm);
+	const name = Form.useWatch("name", upsertForm);
+	const instrument = Form.useWatch("instrument", upsertForm);
+
+	const isFormValid = !!name && !!frequency && (frequency === "EOM" || !!instrument);
 
 	const handleCreate = async () => {
 		const values = await upsertForm.validateFields();
@@ -57,6 +61,7 @@ const UpsertBacktestModal = ({
 		upsertForm.resetFields();
 		setOpen(false);
 	};
+
 
 	useEffect(() => {
 		if (backtest) {
@@ -83,6 +88,7 @@ const UpsertBacktestModal = ({
 			okText={backtest ? "Update" : "Create"}
 			cancelText="Cancel"
 			confirmLoading={creating}
+			okButtonProps={{ disabled: !isFormValid }}
 			destroyOnHidden
 		>
 			<Form
@@ -119,8 +125,13 @@ const UpsertBacktestModal = ({
 				{!backtest &&
 					(frequency === FrequencyType.EOD ||
 						frequency === FrequencyType.EOW) && (
-						<Form.Item name="instrument" label="Instrument">
+						<Form.Item
+							name="instrument"
+							label="Instrument"
+							rules={[{ required: true, message: "Select an instrument" }]}
+						>
 							<Select
+								placeholder="Select instrument"
 								options={[
 									{ value: "options", label: "Options" },
 									{ value: "futures", label: "Futures" },

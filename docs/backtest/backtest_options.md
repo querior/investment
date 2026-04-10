@@ -1,372 +1,560 @@
-# Backtest Options
-
-## Obiettivo
-
-Costruire un motore di backtest per strategie opzionali su ETF/indici con:
-
-* pricing teorico tramite Black-Scholes
-* greche aggregate
-* gestione di spread e strutture a rischio definito
-* persistenza di posizioni, snapshot e performance
-* possibile integrazione futura con segnali macro
+# 📘 Backtest Options — Documento Unificato (Baseline Operativa Completa)
 
 ---
 
-## Architettura concettuale
+## 1. Obiettivo
 
-Separazione in tre livelli:
+Costruire un motore di backtest per strategie opzionali su ETF/indici con:
 
-1. **Domain / runtime model**
+* pricing teorico (Black-Scholes)
+* gestione greche
+* strutture multi-leg (spread, butterfly)
+* simulazione IV
+* integrazione macro regime
+* persistenza completa (snapshot + performance)
+* analytics e visualizzazione
+* evoluzione verso motore adattivo
+
+---
+
+## 2. Architettura
+
+### Layer
+
+1. **Domain (runtime)**
 
    * `OptionLeg`
    * `Position`
-   * `PortfolioSnapshot`
    * `Portfolio`
 
-2. **Persistence model**
+2. **Persistence**
 
    * `BacktestRun`
    * `BacktestPosition`
    * `BacktestPositionSnapshot`
    * `BacktestPortfolioPerformance`
+   * `BacktestPerformance`
+   * `BacktestRunParameter`
 
-3. **Backtest engine**
+3. **Engine**
 
-   * ciclo giornaliero
-   * update prezzi e greche
-   * close logic
-   * entry logic
+   * loop giornaliero
+   * update mercato
+   * entry/exit
    * salvataggio snapshot
+
+4. **Data preparation**
+
+   * costruzione dataset (prezzi + IV + macro)
 
 ---
 
-## Flusso del ciclo di backtest
+## 3. Flusso del backtest
 
 Per ogni giorno:
 
-1. Legge `date`, `close`, `iv`
-2. Aggiorna le posizioni aperte (`S`, `IV`, `T`)
-3. Ricalcola prezzo posizione e greche
-4. Salva snapshot posizione
-5. Valuta eventuale chiusura
-6. Apre nuove posizioni se le condizioni lo permettono
-7. Salva snapshot portfolio
-
-Il segnale macro, quando verrà integrato, va usato **solo in apertura** come contesto di regime.
+1. update posizioni (S, IV, tempo)
+2. snapshot posizioni
+3. close logic
+4. entry logic (strategy selection)
+5. snapshot portfolio
+6. salvataggio NAV e return
 
 ---
 
-## Pricing e greche
+## 4. Simulazione IV
 
-Per il pricing è stata definita una struttura `OptionState` con:
+### Formula
 
-* `option_type`
-* `S`
-* `K`
-* `T`
-* `r`
-* `sigma`
+$$
+IV_t = \operatorname{clamp}\left(
+1.15 \cdot \sqrt{252} \cdot \operatorname{std}(r_{t-19:t})
 
-Le greche usate nel motore:
+* \alpha \cdot \max(0, -r_t),
+  ; iv_{\min}, ; iv_{\max}
+  \right)
+  $$
 
-* Delta
-* Gamma
-* Theta giornaliera
-* Vega per punto IV
-
-### Formula locale utile
+### Implementazione
 
 ```python
-def option_price_local_approx(
-    current_price: float,
-    dS: float,
-    d_iv_points: float,
-    dt_days: float,
-    greeks: Greeks,
-) -> float:
-    return (
-        current_price
-        + greeks.delta * dS
-        + 0.5 * greeks.gamma * (dS ** 2)
-        + greeks.vega_per_iv_point * d_iv_points
-        + greeks.theta_daily * dt_days
-    )
+def enrich_with_iv(df, alpha=4.0, iv_min=0.10, iv_max=0.80):
+    df = df.sort_values("date").copy()
+
+    log_ret = np.log(df["close"] / df["close"].shift(1))
+    rv_20 = log_ret.rolling(20).std()
+
+    downside_boost = alpha * (-log_ret).clip(lower=0)
+    iv = 1.15 * np.sqrt(252) * rv_20 + downside_boost
+
+    df["iv"] = iv.clip(lower=iv_min, upper=iv_max)
+    return df
 ```
 
-Questa formula è utile per simulazioni rapide, non per pricing definitivo.
+### Note
+
+* warmup necessario (~40–60 giorni)
+* eseguita prima del backtest
+* aggiunge solo la colonna `iv`
 
 ---
 
-## Runtime model
+## 5. P&L Model
 
-### `OptionLeg`
+### Definizioni
 
-Rappresenta una gamba della posizione:
+* **Realized PnL** → posizioni chiuse
+* **Unrealized PnL** → posizioni aperte
+* **Total PnL** → somma
 
-* segno (`+1` long, `-1` short)
-* quantità
-* stato dell’opzione
-
-### `Position`
-
-Rappresenta una struttura composta da più gambe:
-
-* nome posizione
-* gambe
-* valore iniziale
-* stato open/closed
-* metodi per prezzo, pnl e greche aggregate
-
-### `Portfolio`
-
-Tiene traccia di:
-
-* cash
-* posizioni aperte
-* equity
-* greche aggregate
-* storico snapshot
-
----
-
-## Close logic
-
-È stata definita una prima logica semplice di uscita:
-
-* chiusura se profitto >= 50% del credito iniziale
-* chiusura a 21 DTE
-
-### Funzione significativa
+### Portfolio
 
 ```python
-def should_close_position(position: Position) -> bool:
-    current_value = position.price()
-    pnl = current_value - position.initial_value
+_realized_pnl: float = field(init=False)
 
-    if position.initial_value < 0 and pnl >= abs(position.initial_value) * 0.5:
-        return True
+def __post_init__(self):
+    self.cash = self.initial_cash
+    self._realized_pnl = 0.0
 
-    min_t = min(leg.state.T for leg in position.legs)
-    if min_t <= 21 / 365.0:
-        return True
+@property
+def realized_pnl(self):
+    return self._realized_pnl
 
-    return False
+@property
+def unrealized_pnl(self):
+    return sum(p.pnl for p in self.positions if p.is_open)
+
+@property
+def total_pnl(self):
+    return self.realized_pnl + self.unrealized_pnl
 ```
 
 ---
 
-## Entry logic iniziale
+## 6. Performance Tracking
 
-Per la prima versione il motore apre una posizione ogni `entry_every_n_days`.
+### BacktestPerformance
 
-La prima struttura usata è un **bull put spread** con:
-
-* DTE 45
-* strike short ~95% del sottostante
-* strike long ~92% del sottostante
-
-Questa logica è provvisoria e verrà poi sostituita con una policy guidata dal regime macro e dal regime IV.
-
----
-
-## Esecuzione del backtest
-
-### Struttura della funzione
-
-La funzione `run_eod_backtest(...)`:
-
-* riceve `db`, `run`, `df`
-* itera sui dati giornalieri
-* aggiorna le posizioni runtime
-* salva dati su DB tramite i nuovi model
-
-### Pattern rilevante sul loop
+* `nav`
+* `period_return`
 
 ```python
-for i, (_, row) in enumerate(df.iterrows()):
-    snapshot_date = row["date"].date() if hasattr(row["date"], "date") else row["date"]
-    S = float(row["close"])
-    iv = float(row["iv"])
+period_return = (nav_t / nav_{t-1}) - 1
 ```
 
-`enumerate(...)` è stato introdotto per evitare problemi con `%` quando l’indice del DataFrame non è intero.
+### BacktestRun (metriche aggregate)
+
+* CAGR
+* Volatility
+* Sharpe
+* Max Drawdown
+* Win Rate
+* Profit Factor
+* N trades
 
 ---
 
-## Simulazione della IV
+## 7. Strategy Engine
 
-È stato definito un approccio semplice ma realistico per simulare la volatilità implicita partendo dai prezzi:
-
-1. rendimenti logaritmici
-2. rolling std (es. 20 giorni)
-3. annualizzazione
-4. moltiplicatore (`k`, es. 1.15)
-5. clamp min/max
-6. eventuale boost downside
-
-### Formula concettuale
-
-[
-IV_t = clamp\Big(1.15 \cdot \sqrt{252} \cdot std(r_{t-19:t}) + \alpha \cdot \max(0, -r_t)\Big)
-]
-
-Questa IV è unica per il giorno e non rappresenta ancora una surface per strike/scadenza.
-
----
-
-## Data acquisition da DB
-
-I dati di mercato vengono letti da database e trasformati in DataFrame.
-
-### Pattern corretto
+### StrategySpec
 
 ```python
-rows = [
-    {
-        "symbol": x.symbol,
-        "date": x.date,
-        "close": x.close,
-    }
-    for x in data
-]
-
-df = pd.DataFrame(rows)
-```
-
-Questo evita l’errore di shape che si verifica passando direttamente oggetti ORM a `pd.DataFrame(..., columns=[...])`.
-
----
-
-## Gestione errori
-
-Il pattern adottato per l’esecuzione del backtest è:
-
-* `try/except`
-* `rollback()` in caso di errore
-* salvataggio di `run.error_message`
-* rilancio dell’eccezione
-
-### Pattern sintetico
-
-```python
-try:
-    # business logic
-    db.commit()
-except Exception as e:
-    db.rollback()
-    run.error_message = str(e)
-    db.commit()
-    raise
+@dataclass
+class StrategySpec:
+    name: str
+    builder: Optional[Callable[..., Position]]
+    should_trade: bool = True
 ```
 
 ---
 
-## Persistenza: model DB introdotti
+### Strategie implementate
 
-### `BacktestPosition`
-
-Testata della posizione/trade:
-
-* `run_id`
-* `position_type`
-* `status`
-* `opened_at`
-* `closed_at`
-* `entry_underlying`
-* `entry_iv`
-* `entry_macro_regime`
-* `initial_value`
-* `close_value`
-* `realized_pnl`
-
-### `BacktestPositionSnapshot`
-
-Snapshot giornaliero della singola posizione:
-
-* `snapshot_date`
-* `underlying_price`
-* `iv`
-* `position_price`
-* `position_pnl`
-* `position_delta`
-* `position_gamma`
-* `position_theta`
-* `position_vega`
-* `min_dte`
-* `is_open`
-
-### `BacktestPortfolioPerformance`
-
-Snapshot giornaliero del portafoglio:
-
-* `cash`
-* `positions_value`
-* `total_equity`
-* `realized_pnl`
-* `unrealized_pnl`
-* `total_pnl`
-* `total_delta`
-* `total_gamma`
-* `total_theta`
-* `total_vega`
-* `open_positions_count`
-* `closed_positions_count`
-* `new_positions_count`
-* `underlying_price`
-* `iv`
+* bull_put_spread
+* bear_call_spread
+* put_broken_wing_butterfly (neutral)
 
 ---
 
-## Scelte architetturali confermate
+### Esempio builder
 
-### Dataclass runtime separate dalle entity DB
-
-Le dataclass di dominio **non vanno sostituite** con model SQLAlchemy.
-
-Motivo:
-
-* il runtime model serve alla simulazione
-* il persistence model serve al reporting/storage
-
-Quindi il pattern corretto è:
-
-* dataclass per il motore
-* entity SQLAlchemy per la persistenza
-* mapping dominio -> entity nel loop di backtest
+```python
+def create_bear_call_spread(...):
+    short_strike = S * 1.05
+    long_strike = S * 1.08
+```
 
 ---
 
-## Note operative emerse
+### Strategy Selection
 
-* usare `min(leg.state.T for leg in position.legs)` e non `min(leg.state for leg in position.legs)`
-* `closed_at` richiede un `date`, non una stringa
-* i model SQLAlchemy con `relationship("ClassName")` richiedono che tutte le classi siano importate all’avvio
-* per evitare circular import usare `TYPE_CHECKING` e stringhe nelle relationship
-
----
-
-## Prossimi step naturali
-
-1. estrarre mapper/helper di persistenza
-2. introdurre trade log esplicito
-3. integrare il segnale macro solo in apertura
-4. sostituire l’entry fissa con execution policy
-5. aggiungere metriche aggregate per regime e strategia
-6. introdurre rollout strutturato
-7. evolvere la IV da proxy semplice a modello più ricco
+```python
+def select_strategy(iv, macro_regime):
+    if macro_regime == "RISK_ON" and iv < 0.25:
+        return bull_put_strategy()
+    if macro_regime == "RISK_OFF" and iv > 0.30:
+        return bear_call_strategy()
+    return neutral_broken_wing_strategy()
+```
 
 ---
 
-## Stato attuale
+## 8. Macro Integration
 
-Il sistema ha già definito:
+### Funzione
 
-* pricing engine base
-* greche base
-* runtime model per posizioni e portafoglio
-* close logic minima
-* caricamento dati da DB
-* struttura di persistenza per trade, snapshot e performance
-* scheletro funzionante del loop di backtest
+```python
+def compute_macro_risk_score(db, date):
+```
 
-La fase successiva è consolidare il salvataggio puntuale nel ciclo e rendere la strategia guidata da segnali di regime.
+### Logica
+
+* expansion → +1
+* neutral → 0
+* contraction → -1
+
+### Classificazione
+
+* ≥ 0.5 → RISK_ON
+* ≤ -0.5 → RISK_OFF
+* else → NEUTRAL
+
+### Uso
+
+```python
+_, macro_regime = compute_macro_risk_score(db, date)
+strategy = select_strategy(iv, macro_regime)
+```
+
+---
+
+## 9. Parametrizzazione
+
+### Entity
+
+```python
+BacktestRunParameter:
+- key
+- value (string)
+- unit
+```
+
+### Mapping
+
+```python
+params_dict = {
+    p.key: {"value": p.value, "unit": p.unit}
+}
+```
+
+---
+
+## 10. Warmup Period
+
+```python
+load_start = run.start_date - timedelta(days=40)
+df = df[df["date"] >= run.start_date]
+```
+
+---
+
+## 11. Analytics API
+
+### Lista posizioni
+
+```
+GET /runs/{run_id}/positions
+```
+
+Include:
+
+* metadata
+* realized_pnl
+* performance_pct
+* days_in_trade
+* latest snapshot (opzionale)
+
+---
+
+### History posizione
+
+```
+GET /runs/{run_id}/positions/{position_id}/history
+```
+
+Include:
+
+* header posizione
+* serie temporale snapshot
+
+---
+
+## 12. Visualizzazione
+
+### Layout
+
+```
+[ underlying vs position ]
+[ pnl vs iv             ]
+```
+
+### Grafico 1
+
+* underlying_price
+* position_price
+
+### Grafico 2
+
+* position_pnl
+* iv
+
+### Caratteristiche
+
+* asse X condiviso
+* doppio asse Y
+* sincronizzazione
+
+---
+
+## 13. Stato attuale
+
+Sistema supporta:
+
+* IV realistica
+* PnL completo
+* multi-strategy engine
+* macro integration
+* tracking storico
+* base analytics
+
+---
+
+## 14. Estensioni future
+
+### 14.1 Entry Logic avanzata
+
+Problema:
+
+* oggi basata solo su macro + IV
+
+Evoluzione:
+
+* indicatori tecnici (RSI, MACD)
+* trend detection
+* IV rank / percentile
+* multi-factor decision
+
+---
+
+### 14.2 Exit Logic avanzata
+
+Evoluzione:
+
+* stop loss dinamico
+* trailing profit
+* exit su inversione segnali
+* gestione greche
+* adattamento IV
+
+---
+
+### 14.3 Commissioni e Slippage
+
+Da introdurre:
+
+* costo per contratto
+* bid/ask spread
+* slippage dinamico
+
+---
+
+### 14.4 Indicatori tecnici
+
+Possibili:
+
+* RSI
+* MACD
+* Moving averages
+* ATR
+* Bollinger Bands
+
+Uso:
+
+* filtro entry
+* timing
+* conferma segnali
+
+---
+
+### 14.5 Motore adattivo / predittivo
+
+Evoluzione verso:
+
+1. rule-based avanzato
+2. regime detection
+3. machine learning
+4. reinforcement learning
+
+---
+
+## 15. Priorità evolutive
+
+1. migliorare entry logic
+2. migliorare exit logic
+3. introdurre costi
+4. integrare indicatori tecnici
+5. costruire motore adattivo
+
+---
+
+## 16. Stato maturità
+
+Sistema evoluto da:
+
+* prototipo statico
+
+a:
+
+* motore di backtest **dinamico, multi-strategy, macro-aware, estendibile**
+
+
+# 📊 Backtest UI — Prossimi Step (Interattività e Analisi)
+
+---
+
+## 1. Interattività grafici
+
+Obiettivo: rendere i grafici realmente utilizzabili per analisi.
+
+### Da implementare
+- hover sincronizzato tra i due grafici
+- tooltip condiviso con:
+  - date
+  - underlying_price
+  - position_price
+  - position_pnl
+  - iv
+- linea verticale comune (crosshair)
+- zoom orizzontale
+- brush temporale (selezione range)
+- legenda cliccabile (toggle serie)
+
+---
+
+## 2. Annotazioni evento posizione
+
+Aggiungere marker sul grafico:
+
+- apertura posizione
+- chiusura posizione
+- cambio regime macro
+- cambio strategia (futuro)
+- eventuale motivo uscita
+
+👉 fondamentale per interpretabilità
+
+---
+
+## 3. Pannello dettaglio posizione
+
+Visualizzare contesto sopra o accanto ai grafici:
+
+- strategy type
+- status (OPEN / CLOSED)
+- opened_at / closed_at
+- entry_underlying
+- entry_iv
+- entry_macro_regime
+- initial_value
+- close_value
+- realized_pnl
+- days_in_trade
+
+---
+
+## 4. Gestione stati frontend
+
+Gestire correttamente:
+
+- loading state
+- empty state
+- errore API
+- posizione aperta vs chiusa
+- dati mancanti
+
+---
+
+## 5. Performance frontend
+
+Per dataset grandi:
+
+- memoization
+- evitare rerender inutili
+- lazy loading history (solo on click)
+- normalizzazione dati
+
+---
+
+## 6. Tabella posizioni integrata
+
+Funzionalità:
+
+- click su riga → carica grafico posizione
+- evidenziazione posizione selezionata
+- filtri:
+  - OPEN / CLOSED
+  - strategy type
+  - macro regime
+- sorting:
+  - pnl
+  - durata
+  - data apertura
+
+---
+
+## 7. Analisi avanzata (step successivo)
+
+Opzionale:
+
+- terzo grafico:
+  - delta
+  - gamma
+  - theta
+  - vega
+- toggle “advanced view”
+
+---
+
+## 8. Realismo economico
+
+Da introdurre dopo UI stabile:
+
+- commissioni
+- slippage
+
+👉 impatta direttamente i grafici PnL
+
+---
+
+## 📌 Ordine di implementazione consigliato
+
+1. tooltip sincronizzato  
+2. marker apertura/chiusura  
+3. zoom + brush  
+4. click tabella → dettaglio posizione  
+5. filtri lista posizioni  
+6. pannello metadati  
+7. commissioni/slippage  
+8. greche opzionali  
+
+---
+
+## 🎯 Obiettivo
+
+Passare da:
+
+- visualizzazione statica
+
+a:
+
+- **strumento interattivo di analisi trading**

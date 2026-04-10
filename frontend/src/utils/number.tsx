@@ -23,3 +23,17 @@ export function formatDelta(value: number | undefined): JSX.Element {
 	const color = value < 0 ? "text-red-500" : "text-green-600";
 	return <span className={color}>{value.toFixed(4)}</span>;
 }
+
+export function formatParameter(value: string | undefined, unit: string = "value"): string {
+	if (value == null) return "—";
+	const num = parseFloat(value);
+	if (isNaN(num)) return value;
+
+	if (unit === "pct") {
+		return `${(num * 100).toFixed(2)}%`;
+	}
+	if (unit === "bps") {
+		return `${(num / 100).toFixed(2)}%`;
+	}
+	return num.toString();
+}

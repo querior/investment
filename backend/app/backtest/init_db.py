@@ -6,6 +6,10 @@ from app.backtest.schemas.backtest_run import BacktestRun
 from app.backtest.schemas.backtest_weight import BacktestWeight
 from app.backtest.schemas.backtest_performance import BacktestPerformance
 from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
+from app.backtest.schemas.option_strategy import OptionStrategy
+from app.backtest.schemas.backtest_position import BacktestPosition
+from app.backtest.schemas.backtest_position_snapshot import BacktestPositionSnapshot
+from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
 
 _TABLES = [
     Backtest.__table__,
@@ -13,6 +17,10 @@ _TABLES = [
     BacktestWeight.__table__,
     BacktestPerformance.__table__,
     BacktestRunParameter.__table__,
+    OptionStrategy.__table__,
+    BacktestPosition.__table__,
+    BacktestPositionSnapshot.__table__,
+    BacktestPortfolioPerformance.__table__,
 ]
 
 
@@ -57,8 +65,11 @@ def init_backtest_db(reset: bool = False) -> None:
                 run_id INTEGER NOT NULL REFERENCES backtest_runs(id) ON DELETE CASCADE,
                 key    VARCHAR NOT NULL,
                 value  VARCHAR NOT NULL,
+                unit   VARCHAR DEFAULT 'value',
                 UNIQUE (run_id, key)
             );
+            ALTER TABLE backtest_run_parameters
+                ADD COLUMN IF NOT EXISTS unit VARCHAR DEFAULT 'value';
             -- Ricrea FK con ON DELETE CASCADE se non già presente
             DO $$
             BEGIN

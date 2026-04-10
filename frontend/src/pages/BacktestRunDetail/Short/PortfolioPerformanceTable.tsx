@@ -1,154 +1,122 @@
-import { Card, Table } from "antd";
+import { Card, Table, Tag } from "antd";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "../../../store/reducers";
 import { ColumnsType } from "antd/es/table";
 import { fetchPortfolioPerformanceRequest } from "../../../features/backtest/reducer";
+import { BacktestPositionDto } from "../../../features/backtest/types";
 import {
 	formatCurrency,
 	formatPercent,
 	formatNumber,
 	formatDelta,
 } from "../../../utils/number";
+import { useEffect } from "react";
+import { PositionHistoryExpandedRow } from "./PositionHistoryExpandedRow";
 
-type PortfolioRow = {
-	snapshot_date: string;
-	cash: number;
-	positions_value: number;
-	total_equity: number;
-	realized_pnl: number;
-	unrealized_pnl: number;
-	total_pnl: number;
-	total_delta: number;
-	total_gamma: number;
-	total_theta: number;
-	total_vega: number;
-	open_positions_count: number;
-	closed_positions_count: number;
-	new_positions_count: number;
-	underlying_price: number;
-	iv: number;
-};
-
-function buildPortfolioColumns(): ColumnsType<PortfolioRow> {
+function buildPositionsColumns(): ColumnsType<BacktestPositionDto> {
 	return [
 		{
-			title: "Date",
-			dataIndex: "snapshot_date",
-			key: "snapshot_date",
+			title: "Type",
+			key: "position_type",
+			width: 120,
+			render: (_: unknown, row: BacktestPositionDto) =>
+				row.strategy_acronym ? (
+					<Tag color={row.strategy_color}>
+						{row.strategy_acronym}
+					</Tag>
+				) : (
+					<span className="text-gray-500">{row.position_type}</span>
+				),
+		},
+		{
+			title: "Status",
+			dataIndex: "status",
+			key: "status",
+			width: 80,
+		},
+		{
+			title: "Opened",
+			dataIndex: "opened_at",
+			key: "opened_at",
 			width: 110,
 			render: (date: string) => date,
 		},
 		{
-			title: "Cash",
-			key: "cash",
-			width: 100,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatCurrency(row.cash),
-		},
-		{
-			title: "Positions",
-			key: "positions_value",
-			width: 100,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatCurrency(row.positions_value),
-		},
-		{
-			title: "Total Equity",
-			key: "total_equity",
+			title: "Closed",
+			dataIndex: "closed_at",
+			key: "closed_at",
 			width: 110,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatCurrency(row.total_equity),
+			render: (date: string | null) => date || "-",
+		},
+		{
+			title: "Days",
+			dataIndex: "days_in_trade",
+			key: "days_in_trade",
+			width: 70,
+		},
+		{
+			title: "Entry S",
+			key: "entry_underlying",
+			width: 90,
+			render: (_: unknown, row: BacktestPositionDto) =>
+				formatNumber(row.entry_underlying, 2),
+		},
+		{
+			title: "Entry IV",
+			key: "entry_iv",
+			width: 90,
+			render: (_: unknown, row: BacktestPositionDto) =>
+				formatPercent(row.entry_iv),
+		},
+		{
+			title: "Initial Value",
+			key: "initial_value",
+			width: 110,
+			render: (_: unknown, row: BacktestPositionDto) =>
+				formatCurrency(row.initial_value),
+		},
+		{
+			title: "Close Value",
+			key: "close_value",
+			width: 110,
+			render: (_: unknown, row: BacktestPositionDto) =>
+				row.close_value !== null
+					? formatCurrency(row.close_value)
+					: "-",
 		},
 		{
 			title: "Realized P&L",
 			key: "realized_pnl",
 			width: 110,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.realized_pnl),
+			render: (_: unknown, row: BacktestPositionDto) =>
+				row.realized_pnl !== null
+					? formatDelta(row.realized_pnl)
+					: "-",
 		},
 		{
 			title: "Unrealized P&L",
 			key: "unrealized_pnl",
 			width: 110,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.unrealized_pnl),
+			render: (_: unknown, row: BacktestPositionDto) =>
+				row.unrealized_pnl !== null
+					? formatDelta(row.unrealized_pnl)
+					: "-",
 		},
 		{
-			title: "Total P&L",
-			key: "total_pnl",
-			width: 110,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.total_pnl),
-		},
-		{
-			title: "Delta",
-			key: "total_delta",
-			width: 80,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.total_delta),
-		},
-		{
-			title: "Gamma",
-			key: "total_gamma",
-			width: 80,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.total_gamma),
-		},
-		{
-			title: "Theta",
-			key: "total_theta",
-			width: 80,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.total_theta),
-		},
-		{
-			title: "Vega",
-			key: "total_vega",
-			width: 80,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatDelta(row.total_vega),
-		},
-		{
-			title: "Open",
-			key: "open_positions_count",
-			width: 60,
-			render: (_: unknown, row: PortfolioRow) =>
-				row.open_positions_count,
-		},
-		{
-			title: "Closed",
-			key: "closed_positions_count",
-			width: 60,
-			render: (_: unknown, row: PortfolioRow) =>
-				row.closed_positions_count,
-		},
-		{
-			title: "New",
-			key: "new_positions_count",
-			width: 60,
-			render: (_: unknown, row: PortfolioRow) =>
-				row.new_positions_count,
-		},
-		{
-			title: "Underlying",
-			key: "underlying_price",
+			title: "Return %",
+			key: "performance_pct",
 			width: 100,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatNumber(row.underlying_price, 2),
-		},
-		{
-			title: "IV",
-			key: "iv",
-			width: 70,
-			render: (_: unknown, row: PortfolioRow) =>
-				formatPercent(row.iv),
+			render: (_: unknown, row: BacktestPositionDto) =>
+				row.performance_pct !== null
+					? formatPercent(row.performance_pct)
+					: "-",
 		},
 	];
 }
 
 const PortfolioPerformanceTable = () => {
 	const dispatch = useDispatch();
-	const { portfolioPerformances, currentRun, loading, current } = useSelector(
+	const { positions, currentRun, loading, current } = useSelector(
 		(state: RootState) => state.backtest
 	);
 
@@ -169,25 +137,47 @@ const PortfolioPerformanceTable = () => {
 		}
 	};
 
+	useEffect(() => {
+		if (!currentRun) return;
+		dispatch(
+			fetchPortfolioPerformanceRequest({
+				backtestId: currentRun.backtest_id,
+				runId: currentRun.id,
+				page: 1,
+				limit: 20,
+			})
+		);
+	}, [currentRun?.updated_at, dispatch]);
+
 	return (
-		<Card size="small" title="Portfolio Performance">
+		<Card size="small" title="Positions">
 			<Table
-				rowKey="snapshot_date"
+				rowKey="id"
 				size="small"
-				columns={buildPortfolioColumns()}
-				dataSource={portfolioPerformances.items}
+				columns={buildPositionsColumns()}
+				dataSource={positions.items}
 				loading={loading}
+				expandable={{
+					expandedRowRender: (record) =>
+						backtestId && runId ? (
+							<PositionHistoryExpandedRow
+								backtestId={backtestId}
+								runId={runId}
+								position={record}
+							/>
+						) : null,
+				}}
 				pagination={{
-					current: portfolioPerformances.page,
-					pageSize: portfolioPerformances.page_size,
-					total: portfolioPerformances.total,
+					current: positions.page,
+					pageSize: positions.page_size,
+					total: positions.total,
 					showTotal: (t) => `${t} records`,
 					onChange: handlePaginationChange,
 				}}
 				locale={{
 					emptyText: isDone
-						? "No portfolio performance data"
-						: "Run the backtest to see portfolio performance",
+						? "No positions data"
+						: "Run the backtest to see positions",
 				}}
 				scroll={{ x: 1500 }}
 			/>

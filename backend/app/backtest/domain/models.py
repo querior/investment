@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List
-from app.backtest.option.pricing import OptionState, black_scholes_greeks, black_scholes_price
+from app.backtest.domain.option.pricing import OptionState, black_scholes_greeks, black_scholes_price
 
 CONTRACT_MULTIPLIER = 100
 
@@ -93,9 +93,11 @@ class Portfolio:
   cash: float = field(init=False)
   positions: List[Position] = field(default_factory=list)
   history: List[PortfolioSnapshot] = field(default_factory=list)
+  _realized_pnl: float = field(init=False)
   
   def __post_init__(self) -> None:
     self.cash = self.initial_cash
+    self._realized_pnl = 0.0
     
   def open_position(self, position: Position) -> None:
     position.initial_value = position.price
@@ -105,8 +107,9 @@ class Portfolio:
   def close_position(self, position: Position) -> None:
     if not position.is_open:
         return
-    self.cash += position.price
     position.is_open = False
+    self.cash += position.price
+    self._realized_pnl += position.pnl
 
   def remove_closed_positions(self) -> None:
     self.positions = [p for p in self.positions if p.is_open]
@@ -133,5 +136,17 @@ class Portfolio:
   @property
   def total_vega(self) -> float:
     return sum(p.vega for p in self.positions if p.is_open)
+  
+  @property
+  def realized_pnl(self) -> float:
+      return self._realized_pnl
+
+  @property
+  def unrealized_pnl(self) -> float:
+      return sum(p.pnl for p in self.positions if p.is_open)
+
+  @property
+  def total_pnl(self) -> float:
+      return self.realized_pnl + self.unrealized_pnl
   
   

@@ -87,13 +87,17 @@ export default function BacktestRunDetail() {
 	} = useSelector((state: RootState) => state.backtest);
 
 	const isExecuting = executingRunId === runIdNum;
+	const isRunning = currentRun?.status === "RUNNING" || isExecuting;
 	const [navData, setNavData] = useState<{ date: string; nav: number }[]>([]);
 
 	useEffect(() => {
 		dispatch(fetchBacktestRequest(backtestId));
-		dispatch(fetchRunDetailRequest({ backtestId, runId: runIdNum }));
+		// Carica il run solo se non è in esecuzione (il polling lo aggiorna continuamente se in RUNNING)
+		if (!isRunning) {
+			dispatch(fetchRunDetailRequest({ backtestId, runId: runIdNum }));
+		}
 		dispatch(fetchBacktestConfigRequest(backtestId));
-	}, [backtestId, runIdNum, dispatch]);
+	}, [backtestId, runIdNum, dispatch, isRunning]);
 
 	useEffect(() => {
 		if (!currentRun) return;
@@ -126,15 +130,25 @@ export default function BacktestRunDetail() {
 	};
 
 	const isDone = currentRun?.status === "DONE";
-	const isRunning = currentRun?.status === "RUNNING" || isExecuting;
 
 	type ParamDraft = Record<string, string | number>;
 
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState<ParamDraft | null>(null);
 
-	const isPercentParam = (key: string): boolean => {
-		return key.includes("factor") || key.includes("alpha");
+	const getParamValueString = (param: any): string => {
+		if (typeof param === "string") return param;
+		if (typeof param === "object" && param?.value) return param.value;
+		return "";
+	};
+
+	const getParamUnit = (param: any): string => {
+		if (typeof param === "object" && param?.unit) return param.unit;
+		return "value";
+	};
+
+	const isPercentParam = (key: string, unit?: string): boolean => {
+		return unit === "pct";
 	};
 
 	const isSelectParam = (key: string): boolean => {
@@ -144,11 +158,13 @@ export default function BacktestRunDetail() {
 	const startEdit = () => {
 		if (!currentRun?.parameters) return;
 		const newDraft: ParamDraft = {};
-		for (const [key, value] of Object.entries(currentRun.parameters)) {
-			if (isPercentParam(key)) {
-				newDraft[key] = parseFloat(value as string) * 100;
+		for (const [key, param] of Object.entries(currentRun.parameters)) {
+			const valueStr = getParamValueString(param);
+			const unit = getParamUnit(param);
+			if (isPercentParam(key, unit)) {
+				newDraft[key] = parseFloat(valueStr) * 100;
 			} else {
-				newDraft[key] = value;
+				newDraft[key] = valueStr;
 			}
 		}
 		setDraft(newDraft);
@@ -471,13 +487,15 @@ export default function BacktestRunDetail() {
 								<div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
 									{currentRun?.parameters &&
 										Object.entries(currentRun.parameters).map(
-											([key, value]) => {
-												const isPercent = isPercentParam(key);
+											([key, param]) => {
+												const valueStr = getParamValueString(param);
+												const unit = getParamUnit(param);
+												const isPercent = isPercentParam(key, unit);
 												const isSelect = isSelectParam(key);
 												const displayLabel = getParamLabel(key);
 												const displayValue = isPercent
-													? (parseFloat(value as string) * 100).toFixed(0)
-													: value;
+													? (parseFloat(valueStr) * 100).toFixed(0) + "%"
+													: valueStr;
 
 												return (
 													<div
@@ -528,7 +546,7 @@ export default function BacktestRunDetail() {
 															)
 														) : (
 															<span className="font-mono font-medium">
-																{isPercent ? `${displayValue}%` : displayValue}
+																{displayValue}
 															</span>
 														)}
 													</div>

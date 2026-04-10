@@ -1,4 +1,4 @@
-import { call, delay, put, takeLatest } from "redux-saga/effects";
+import { call, delay, put, select, takeLatest } from "redux-saga/effects";
 import {
 	listBacktestsApi,
 	createBacktestApi,
@@ -210,16 +210,41 @@ function* executeRunEffect(action: ReturnType<typeof executeRunRequest>): any {
 			yield delay(2000);
 			const run = yield call(getRunApi, backtestId, runId);
 			yield put(fetchRunDetailSuccess(run));
-			try {
-				const weights = yield call(getRunWeightsApi, backtestId, runId);
-				yield put(fetchRunWeightsSuccess(weights));
-			} catch {}
+
+			// Prendi il backtest dal reducer per sapere la frequency
+			const state: any = yield select();
+			const backtest = state.backtest.current;
+
+			// Carica i dati corretti in base al tipo di backtest
+			if (backtest?.frequency === "EOM") {
+				// LONG: carica i pesi
+				try {
+					const weights = yield call(getRunWeightsApi, backtestId, runId);
+					yield put(fetchRunWeightsSuccess(weights));
+				} catch {}
+			} else if (backtest?.frequency === "EOD") {
+				// OPTION/SHORT: carica le performances
+				yield put(
+					fetchPortfolioPerformanceRequest({
+						backtestId,
+						runId,
+						page: 1,
+						limit: 20,
+					})
+				);
+			}
+
 			if (run.status !== "RUNNING") break;
 		}
 
+		// Fetch finale ritardato per assicurarsi che i metriche siano calcolati
+		yield delay(1000);
+		try {
+			const finalRun = yield call(getRunApi, backtestId, runId);
+			yield put(fetchRunDetailSuccess(finalRun));
+		} catch {}
+
 		yield put(executeRunSuccess(runId));
-		const runs = yield call(listRunsApi, backtestId);
-		yield put(fetchRunsSuccess(runs));
 	} catch (e: any) {
 		yield put(executeRunFailure(runId));
 	}
@@ -326,6 +351,9 @@ export function* backtestWatcher() {
 	yield takeLatest(invalidateRunRequest.type, invalidateRunEffect);
 	yield takeLatest(fetchRunDetailRequest.type, fetchRunDetailEffect);
 	yield takeLatest(fetchRunWeightsRequest.type, fetchRunWeightsEffect);
-	yield takeLatest(fetchPortfolioPerformanceRequest.type, fetchPortfolioPerformancesEffect);
+	yield takeLatest(
+		fetchPortfolioPerformanceRequest.type,
+		fetchPortfolioPerformancesEffect
+	);
 	yield takeLatest(fetchBacktestConfigRequest.type, fetchBacktestConfigEffect);
 }

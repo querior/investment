@@ -10,5 +10,6 @@ class BacktestRunParameter(Base):
     run_id : Mapped[int] = mapped_column(Integer, ForeignKey("backtest_runs.id", ondelete="CASCADE"), nullable=False)
     key    : Mapped[str] = mapped_column(String, nullable=False)
     value  : Mapped[str] = mapped_column(String, nullable=False)
+    unit   : Mapped[str] = mapped_column(String, nullable=False, default="value")
 
     __table_args__ = (UniqueConstraint("run_id", "key"),)

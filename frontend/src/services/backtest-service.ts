@@ -2,7 +2,8 @@ import type {
 	BacktestConfigDto,
 	BacktestDto,
 	BacktestListResponse,
-	BacktestPortfolioPerformanceDto,
+	BacktestPositionDto,
+	BacktestPositionHistoryDto,
 	BacktestRunDto,
 	BacktestStatus,
 	CreateBacktestPayload,
@@ -146,14 +147,25 @@ export const getPortfolioPerformancesApi = async (
 	page = 1,
 	limit = 20
 ): Promise<{
-	items: BacktestPortfolioPerformanceDto[];
+	items: BacktestPositionDto[];
 	total: number;
 	page: number;
 	limit: number;
 }> => {
 	const res = await api.get(
-		`/backtests/${backtestId}/runs/${runId}/performances`,
+		`/backtests/${backtestId}/runs/${runId}/positions`,
 		{ params: { page, limit } }
+	);
+	return res.data;
+};
+
+export const getPositionHistoryApi = async (
+	backtestId: number,
+	runId: number,
+	positionId: number
+): Promise<BacktestPositionHistoryDto[]> => {
+	const res = await api.get(
+		`/backtests/${backtestId}/runs/${runId}/positions/${positionId}/history`
 	);
 	return res.data;
 };

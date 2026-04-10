@@ -3,11 +3,14 @@ import type {
 	BacktestConfigDto,
 	BacktestDto,
 	BacktestPortfolioPerformanceDto,
+	BacktestPositionDto,
 	BacktestRunDto,
 	BacktestState,
 	CreateBacktestPayload,
 	CreateRunPayload,
 	PortfolioPerformanceState,
+	PositionsState,
+	RunParameter,
 	RunWeightDto,
 } from "./types";
 
@@ -32,6 +35,12 @@ const initialState: BacktestState = {
 	runWeights: [],
 	runWeightsLoading: false,
 	portfolioPerformances: {
+		items: [],
+		page: 1,
+		page_size: 20,
+		total: 0,
+	},
+	positions: {
 		items: [],
 		page: 1,
 		page_size: 20,
@@ -188,7 +197,10 @@ const slice = createSlice({
 				if (start !== undefined) run.start_date = start;
 				if (end !== undefined) run.end_date = end;
 				if (parameters !== undefined)
-					run.parameters = { ...run.parameters, ...parameters };
+					run.parameters = {
+						...run.parameters,
+						...(parameters as unknown as Record<string, RunParameter>),
+					};
 			};
 			const run = state.runs.find((r) => r.id === action.payload.runId);
 			if (run) applyTo(run);
@@ -250,14 +262,14 @@ const slice = createSlice({
 		fetchPortfolioPerformanceSuccess(
 			state,
 			action: PayloadAction<{
-				items: BacktestPortfolioPerformanceDto[];
+				items: BacktestPositionDto[];
 				total: number;
 				page: number;
 				limit: number;
 			}>
 		) {
 			state.loading = false;
-			state.portfolioPerformances = {
+			state.positions = {
 				items: action.payload.items,
 				page: action.payload.page,
 				page_size: action.payload.limit,
