@@ -460,18 +460,22 @@ export default function BacktestRunDetail() {
 								</div>
 								<div>
 									<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
-										Return
+										Total Return
 									</div>
 									<div
 										className={`text-2xl font-bold ${
-											navData[navData.length - 1]?.period_return >= 0
-												? "text-green-600"
-												: "text-red-600"
+											navData.length >= 2
+												? (navData[navData.length - 1].nav / navData[0].nav) - 1 >= 0
+													? "text-green-600"
+													: "text-red-600"
+												: "text-gray-400"
 										}`}
 									>
-										{(
-											(navData[navData.length - 1]?.period_return ?? 0) * 100
-										).toFixed(2)}
+										{navData.length >= 2
+											? (
+												((navData[navData.length - 1].nav / navData[0].nav) - 1) * 100
+											).toFixed(2)
+											: "—"}
 										%
 									</div>
 								</div>
