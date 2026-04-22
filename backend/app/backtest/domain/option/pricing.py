@@ -20,6 +20,7 @@ class OptionState:
   T: float           # tempo a scadenza in anni
   r: float           # tasso risk-free annuale, es. 0.04
   sigma: float       # volatilità implicita annuale, es. 0.25
+  q: float = 0.0     # dividend yield continuo (da InstrumentConfig)
 
 
 @dataclass
@@ -28,6 +29,7 @@ class Greeks:
   gamma: float
   theta_daily: float
   vega_per_iv_point: float
+  prob_itm: float    # N(d2) per call, N(-d2) per put
 
 
 def _validate_inputs(state: OptionState) -> None:
@@ -47,7 +49,7 @@ def _d1_d2(state: OptionState) -> tuple[float, float]:
   _validate_inputs(state)
   d1 = (
     log(state.S / state.K)
-    + (state.r + 0.5 * state.sigma ** 2) * state.T
+    + (state.r - state.q + 0.5 * state.sigma ** 2) * state.T
   ) / (state.sigma * sqrt(state.T))
   d2 = d1 - state.sigma * sqrt(state.T)
   return d1, d2
@@ -57,31 +59,44 @@ def black_scholes_price(state: OptionState) -> float:
   d1, d2 = _d1_d2(state)
 
   if state.option_type == "call":
-    return state.S * norm_cdf(d1) - state.K * exp(-state.r * state.T) * norm_cdf(d2)
+    return (
+      state.S * exp(-state.q * state.T) * norm_cdf(d1)
+      - state.K * exp(-state.r * state.T) * norm_cdf(d2)
+    )
 
-  return state.K * exp(-state.r * state.T) * norm_cdf(-d2) - state.S * norm_cdf(-d1)
+  return (
+    state.K * exp(-state.r * state.T) * norm_cdf(-d2)
+    - state.S * exp(-state.q * state.T) * norm_cdf(-d1)
+  )
 
 
 def black_scholes_greeks(state: OptionState) -> Greeks:
   d1, d2 = _d1_d2(state)
 
+  disc_q = exp(-state.q * state.T)
+  disc_r = exp(-state.r * state.T)
+
   if state.option_type == "call":
-    delta = norm_cdf(d1)
+    delta = disc_q * norm_cdf(d1)
+    prob_itm = norm_cdf(d2)
     theta_annual = (
-      -(state.S * norm_pdf(d1) * state.sigma) / (2.0 * sqrt(state.T))
-      - state.r * state.K * exp(-state.r * state.T) * norm_cdf(d2)
+      -(state.S * disc_q * norm_pdf(d1) * state.sigma) / (2.0 * sqrt(state.T))
+      + state.q * state.S * disc_q * norm_cdf(d1)
+      - state.r * state.K * disc_r * norm_cdf(d2)
     )
   else:
-    delta = norm_cdf(d1) - 1.0
+    delta = disc_q * (norm_cdf(d1) - 1.0)
+    prob_itm = norm_cdf(-d2)
     theta_annual = (
-      -(state.S * norm_pdf(d1) * state.sigma) / (2.0 * sqrt(state.T))
-      + state.r * state.K * exp(-state.r * state.T) * norm_cdf(-d2)
+      -(state.S * disc_q * norm_pdf(d1) * state.sigma) / (2.0 * sqrt(state.T))
+      - state.q * state.S * disc_q * norm_cdf(-d1)
+      + state.r * state.K * disc_r * norm_cdf(-d2)
     )
 
-  gamma = norm_pdf(d1) / (state.S * state.sigma * sqrt(state.T))
+  gamma = disc_q * norm_pdf(d1) / (state.S * state.sigma * sqrt(state.T))
 
   # vega classica per variazione di sigma in unità decimali
-  vega = state.S * norm_pdf(d1) * sqrt(state.T)
+  vega = state.S * disc_q * norm_pdf(d1) * sqrt(state.T)
 
   # conversione pratica: prezzo per +1 punto di IV (es. 20% -> 21%)
   vega_per_iv_point = vega * 0.01
@@ -94,6 +109,7 @@ def black_scholes_greeks(state: OptionState) -> Greeks:
     gamma=gamma,
     theta_daily=theta_daily,
     vega_per_iv_point=vega_per_iv_point,
+    prob_itm=prob_itm,
   )
 
 

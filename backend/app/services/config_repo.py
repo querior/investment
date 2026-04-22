@@ -10,6 +10,8 @@ from app.db.pillar import Pillar
 from app.db.pillar_component import PillarComponent
 from app.db.asset_class import AssetClass
 from app.db.backtest_parameter import BacktestParameter
+from app.backtest.schemas.instrument_config import InstrumentConfig as InstrumentConfigDB
+from app.backtest.domain.instrument import InstrumentConfig
 
 
 def get_fred_tickers(db: Session) -> set[str]:
@@ -192,3 +194,13 @@ def get_asset_proxy_map(db: Session) -> dict[str, str]:
         .all()
     )
     return {asset.name: sym.symbol for asset, sym in rows}
+
+
+def get_instrument_config(db: Session, ticker: str) -> InstrumentConfig:
+    """Carica InstrumentConfig dal DB per ticker. Fallback su IWM se non trovato."""
+    record = db.query(InstrumentConfigDB).filter(InstrumentConfigDB.ticker == ticker).first()
+    if record is None:
+        record = db.query(InstrumentConfigDB).filter(InstrumentConfigDB.ticker == "IWM").first()
+    if record is None:
+        raise ValueError(f"InstrumentConfig non trovato per ticker '{ticker}' e fallback IWM assente.")
+    return InstrumentConfig.from_db(record)

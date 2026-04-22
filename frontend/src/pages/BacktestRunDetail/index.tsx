@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -7,27 +7,21 @@ import {
 	Card,
 	DatePicker,
 	Input,
-	InputNumber,
 	Popconfirm,
-	Select,
 	Skeleton,
-	Statistic,
-	Table,
 } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import {
-	ArrowDownOutlined,
 	ArrowLeftOutlined,
-	ArrowUpOutlined,
 	BorderOutlined,
 	CheckOutlined,
 	CloseOutlined,
 	EditOutlined,
+	FileTextOutlined,
 	PlayCircleOutlined,
 	ReloadOutlined,
 } from "@ant-design/icons";
-import type { ColumnsType } from "antd/es/table";
 import {
 	fetchRunDetailRequest,
 	fetchRunWeightsRequest,
@@ -43,18 +37,13 @@ import type { RootState } from "../../store/reducers";
 import Chart from "../../components/charts/Chart";
 
 import { getRunNavApi } from "../../services/backtest-service";
-import {
-	BacktestStatus,
-	FrequencyType,
-	InitialAllocation,
-	RunWeightDto,
-} from "../../features/backtest/types";
-import { capitalize, fmt } from "../../utils/string";
+import { BacktestStatus, FrequencyType } from "../../features/backtest/types";
+import { capitalize } from "../../utils/string";
 import RegimeAdjustmentsCard from "./Long/RegimeAdjustmentCard";
-import StartingAllocation from "./Long/StartingAllocation";
 import Metrics from "./Metrics";
 import AllocationTable from "./Long/AllocationTable";
 import PortfolioPerformanceTable from "./Short/PortfolioPerformanceTable";
+import ParameterEditor from "../../components/backtest/ParameterEditor";
 
 const STATUS_BADGE: Record<
 	BacktestStatus,
@@ -79,47 +68,35 @@ export default function BacktestRunDetail() {
 
 	const {
 		current: currentBacktest,
+		loading,
 		currentRun,
-		currentRunLoading,
 		executingRunId,
 		invalidatingRunId,
 		backtestConfig,
 	} = useSelector((state: RootState) => state.backtest);
 
-	const isExecuting = executingRunId === runIdNum;
-	const isRunning = currentRun?.status === "RUNNING" || isExecuting;
+	const isRunning = currentRun?.status === "RUNNING";
 	const [navData, setNavData] = useState<{ date: string; nav: number }[]>([]);
 
-	useEffect(() => {
-		dispatch(fetchBacktestRequest(backtestId));
-		// Carica il run solo se non è in esecuzione (il polling lo aggiorna continuamente se in RUNNING)
-		if (!isRunning) {
-			dispatch(fetchRunDetailRequest({ backtestId, runId: runIdNum }));
-		}
-		dispatch(fetchBacktestConfigRequest(backtestId));
-	}, [backtestId, runIdNum, dispatch, isRunning]);
+	// Polling for portfolio performance during execution
+	const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+		null
+	);
 
-	useEffect(() => {
-		if (!currentRun) return;
-		getRunNavApi(backtestId, runIdNum)
-			.then(setNavData)
-			.catch(() => {});
-	}, [currentRun?.updated_at, backtestId, runIdNum]);
-
-	useEffect(() => {
-		if (currentBacktest?.frequency === FrequencyType.EOM) {
-			dispatch(fetchRunWeightsRequest({ backtestId, runId: runIdNum }));
-		}
-
-		if (currentBacktest?.frequency === FrequencyType.EOD) {
-			dispatch(
-				fetchPortfolioPerformanceRequest({
-					backtestId,
-					runId: runIdNum,
-				})
-			);
-		}
-	}, [currentBacktest, runIdNum, backtestId, dispatch]);
+	const refreshData = () => {
+		dispatch(
+			fetchRunDetailRequest({
+				backtestId,
+				runId: runIdNum,
+			})
+		);
+		dispatch(
+			fetchPortfolioPerformanceRequest({
+				backtestId,
+				runId: runIdNum,
+			})
+		);
+	};
 
 	const handleExecute = () => {
 		dispatch(executeRunRequest({ backtestId, runId: runIdNum }));
@@ -133,62 +110,22 @@ export default function BacktestRunDetail() {
 
 	type ParamDraft = Record<string, string | number>;
 
-	const [isEditing, setIsEditing] = useState(false);
-	const [draft, setDraft] = useState<ParamDraft | null>(null);
+	const [isEditingParams, setIsEditingParams] = useState(false);
 
-	const getParamValueString = (param: any): string => {
-		if (typeof param === "string") return param;
-		if (typeof param === "object" && param?.value) return param.value;
-		return "";
+	const handleSaveParams = (parameters: Record<string, string>) => {
+		dispatch(
+			updateRunRequest({
+				backtestId,
+				runId: runIdNum,
+				patch: { parameters },
+			})
+		);
+		dispatch(invalidateRunRequest({ backtestId, runId: runIdNum }));
+		setIsEditingParams(false);
 	};
 
-	const getParamUnit = (param: any): string => {
-		if (typeof param === "object" && param?.unit) return param.unit;
-		return "value";
-	};
-
-	const isPercentParam = (key: string, unit?: string): boolean => {
-		return unit === "pct";
-	};
-
-	const isSelectParam = (key: string): boolean => {
-		return key === "initial_allocation";
-	};
-
-	const startEdit = () => {
-		if (!currentRun?.parameters) return;
-		const newDraft: ParamDraft = {};
-		for (const [key, param] of Object.entries(currentRun.parameters)) {
-			const valueStr = getParamValueString(param);
-			const unit = getParamUnit(param);
-			if (isPercentParam(key, unit)) {
-				newDraft[key] = parseFloat(valueStr) * 100;
-			} else {
-				newDraft[key] = valueStr;
-			}
-		}
-		setDraft(newDraft);
-		setIsEditing(true);
-	};
-
-	const cancelEdit = () => {
-		setIsEditing(false);
-		setDraft(null);
-	};
-
-	const INITIAL_ALLOCATION_OPTIONS: {
-		value: InitialAllocation;
-		label: string;
-	}[] = [
-		{ value: "neutral", label: "Neutral weights" },
-		{ value: "target", label: "First target" },
-	];
-
-	const getParamLabel = (key: string): string => {
-		return key
-			.split("_")
-			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-			.join(" ");
+	const handleCancelParams = () => {
+		setIsEditingParams(false);
 	};
 
 	type InfoDraft = { name: string; start: string; end: string };
@@ -227,27 +164,62 @@ export default function BacktestRunDetail() {
 		setInfoDraft(null);
 	};
 
-	const saveParams = () => {
-		if (!draft) return;
-		const params: Record<string, string> = {};
-		for (const [key, value] of Object.entries(draft)) {
-			if (isPercentParam(key)) {
-				params[key] = String((value as number) / 100);
-			} else {
-				params[key] = String(value);
+	useEffect(() => {
+		dispatch(fetchBacktestRequest(backtestId));
+		if (currentBacktest?.frequency === "EOD") {
+			// Carica il run solo se non è in esecuzione (il polling lo aggiorna continuamente se in RUNNING)
+			if (!isRunning) {
+				refreshData();
 			}
 		}
-		dispatch(
-			updateRunRequest({
-				backtestId,
-				runId: runIdNum,
-				patch: { parameters: params },
-			})
-		);
-		dispatch(invalidateRunRequest({ backtestId, runId: runIdNum }));
-		setIsEditing(false);
-		setDraft(null);
-	};
+
+		if (currentBacktest?.frequency === FrequencyType.EOM) {
+			dispatch(fetchRunWeightsRequest({ backtestId, runId: runIdNum }));
+		}
+
+		// Carica parameter schema per tutti i tipi di backtest
+		dispatch(fetchBacktestConfigRequest(backtestId));
+	}, [backtestId, runIdNum, dispatch, isRunning]);
+
+	useEffect(() => {
+		if (
+			!currentRun ||
+			currentRun.status !== "RUNNING" ||
+			currentBacktest?.frequency !== FrequencyType.EOD
+		) {
+			if (pollingIntervalRef.current) {
+				clearInterval(pollingIntervalRef.current);
+				pollingIntervalRef.current = null;
+				setTimeout(() => refreshData(), 2000);
+			}
+			return;
+		}
+
+		if (!pollingIntervalRef.current)
+			pollingIntervalRef.current = setInterval(refreshData, 5000);
+
+		return () => {
+			if (pollingIntervalRef.current) {
+				clearInterval(pollingIntervalRef.current);
+				pollingIntervalRef.current = null;
+			}
+		};
+	}, [
+		currentRun?.status,
+		currentBacktest?.frequency,
+		runIdNum,
+		backtestId,
+		refreshData,
+	]);
+
+	useEffect(() => {
+		if (!currentRun) return;
+		getRunNavApi(backtestId, runIdNum)
+			.then(setNavData)
+			.catch(() => {});
+	}, [currentRun?.updated_at, backtestId, runIdNum]);
+
+	useEffect(refreshData, []);
 
 	return (
 		<div className="p-6 flex flex-col gap-6">
@@ -259,7 +231,7 @@ export default function BacktestRunDetail() {
 				Back
 			</Button>
 
-			{currentRunLoading || !currentRun ? (
+			{loading || !currentRun ? (
 				<Skeleton active />
 			) : (
 				<>
@@ -310,9 +282,12 @@ export default function BacktestRunDetail() {
 							{/* LEFT — meta + portafoglio neutro */}
 							<div className="w-1/2 pr-6 flex flex-col gap-4">
 								<div className="flex items-center justify-between">
-									<span className="text-gray-500 text-xs uppercase tracking-wide">
-										Info
-									</span>
+									<div className="flex items-center gap-2">
+										<FileTextOutlined className="text-gray-500" />
+										<span className="text-gray-500 text-xs uppercase tracking-wide">
+											Info
+										</span>
+									</div>
 									{!isRunning && (
 										<div className="flex gap-2">
 											{isEditingInfo ? (
@@ -445,119 +420,19 @@ export default function BacktestRunDetail() {
 							{/* DIVIDER */}
 							<div className="w-px bg-gray-100 shrink-0 mx-0" />
 
-							{/* RIGHT — parametri di esecuzione */}
-							<div className="w-1/2 pl-6">
-								<div className="flex items-center justify-between mb-3">
-									<span className="text-gray-500 text-xs uppercase tracking-wide">
-										Execution parameters
-									</span>
-									{currentRun && !isRunning && (
-										<div className="flex gap-2">
-											{isEditing ? (
-												<>
-													<Button
-														size="small"
-														icon={<CloseOutlined />}
-														onClick={cancelEdit}
-													>
-														Annulla
-													</Button>
-													<Button
-														size="small"
-														type="primary"
-														icon={<CheckOutlined />}
-														onClick={saveParams}
-														loading={invalidatingRunId === runIdNum}
-													>
-														Salva
-													</Button>
-												</>
-											) : (
-												<Button
-													size="small"
-													icon={<EditOutlined />}
-													onClick={startEdit}
-												>
-													Modifica
-												</Button>
-											)}
-										</div>
-									)}
-								</div>
-								<div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
-									{currentRun?.parameters &&
-										Object.entries(currentRun.parameters).map(
-											([key, param]) => {
-												const valueStr = getParamValueString(param);
-												const unit = getParamUnit(param);
-												const isPercent = isPercentParam(key, unit);
-												const isSelect = isSelectParam(key);
-												const displayLabel = getParamLabel(key);
-												const displayValue = isPercent
-													? (parseFloat(valueStr) * 100).toFixed(0) + "%"
-													: valueStr;
-
-												return (
-													<div
-														key={key}
-														className={isSelect ? "col-span-2" : ""}
-													>
-														<span className="text-gray-500 block">
-															{displayLabel}
-														</span>
-														{isEditing && draft ? (
-															isSelect ? (
-																<Select
-																	size="small"
-																	className="w-40"
-																	value={draft[key] as string}
-																	options={INITIAL_ALLOCATION_OPTIONS}
-																	onChange={(v) =>
-																		setDraft({ ...draft, [key]: v })
-																	}
-																/>
-															) : isPercent ? (
-																<span className="flex items-center gap-1">
-																	<InputNumber
-																		size="small"
-																		min={0}
-																		max={100}
-																		step={5}
-																		className="w-20"
-																		value={draft[key] as number}
-																		onChange={(v) =>
-																			v != null &&
-																			setDraft({ ...draft, [key]: v })
-																		}
-																	/>
-																	<span className="text-gray-400">%</span>
-																</span>
-															) : (
-																<Input
-																	size="small"
-																	value={draft[key] as string}
-																	onChange={(e) =>
-																		setDraft({
-																			...draft,
-																			[key]: e.target.value,
-																		})
-																	}
-																/>
-															)
-														) : (
-															<span className="font-mono font-medium">
-																{displayValue}
-															</span>
-														)}
-													</div>
-												);
-											}
-										)}
-
-									{currentBacktest?.frequency === "EOM" && (
-										<StartingAllocation draft={draft} />
-									)}
-								</div>
+							{/* RIGHT — Parameter Editor (always visible with tabs) */}
+							<div className="w-1/2">
+								{currentRun && (
+									<ParameterEditor
+										currentRun={currentRun}
+										backtestConfig={backtestConfig}
+										onSave={handleSaveParams}
+										onCancel={handleCancelParams}
+										onEdit={() => setIsEditingParams(true)}
+										loading={invalidatingRunId === runIdNum}
+										readOnly={!isEditingParams || isRunning}
+									/>
+								)}
 							</div>
 						</div>
 					</Card>
@@ -570,6 +445,39 @@ export default function BacktestRunDetail() {
 								neutral={backtestConfig.neutral}
 							/>
 						)}
+
+					{/* NAV Summary */}
+					{navData.length > 0 && (
+						<Card size="small" style={{ marginBottom: 16 }}>
+							<div className="flex justify-between items-center gap-8">
+								<div>
+									<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
+										NAV
+									</div>
+									<div className="text-2xl font-bold">
+										${navData[navData.length - 1]?.nav.toFixed(2)}
+									</div>
+								</div>
+								<div>
+									<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
+										Return
+									</div>
+									<div
+										className={`text-2xl font-bold ${
+											navData[navData.length - 1]?.period_return >= 0
+												? "text-green-600"
+												: "text-red-600"
+										}`}
+									>
+										{(
+											(navData[navData.length - 1]?.period_return ?? 0) * 100
+										).toFixed(2)}
+										%
+									</div>
+								</div>
+							</div>
+						</Card>
+					)}
 
 					{/* Metrics */}
 					{currentRun && <Metrics currentRun={currentRun} />}

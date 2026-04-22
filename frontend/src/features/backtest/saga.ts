@@ -1,4 +1,4 @@
-import { call, delay, put, select, takeLatest } from "redux-saga/effects";
+import { call, put, takeLatest } from "redux-saga/effects";
 import {
 	listBacktestsApi,
 	createBacktestApi,
@@ -21,52 +21,38 @@ import {
 import {
 	fetchBacktestsRequest,
 	fetchBacktestsSuccess,
-	fetchBacktestsFailure,
 	fetchBacktestRequest,
 	fetchBacktestSuccess,
-	fetchBacktestFailure,
 	createBacktestRequest,
 	createBacktestSuccess,
-	createBacktestFailure,
 	updateBacktestRequest,
 	updateBacktestSuccess,
-	updateBacktestFailure,
 	deleteBacktestRequest,
 	deleteBacktestSuccess,
-	deleteBacktestFailure,
 	fetchRunsRequest,
 	fetchRunsSuccess,
-	fetchRunsFailure,
 	createRunRequest,
 	createRunSuccess,
-	createRunFailure,
 	updateRunRequest,
 	updateRunSuccess,
 	deleteRunRequest,
 	deleteRunSuccess,
-	deleteRunFailure,
 	executeRunRequest,
 	executeRunSuccess,
-	executeRunFailure,
 	stopRunRequest,
 	stopRunSuccess,
-	stopRunFailure,
 	invalidateRunRequest,
 	invalidateRunSuccess,
-	invalidateRunFailure,
 	fetchRunDetailRequest,
 	fetchRunDetailSuccess,
-	fetchRunDetailFailure,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
-	fetchRunWeightsFailure,
 	fetchPortfolioPerformanceRequest,
 	fetchPortfolioPerformanceSuccess,
-	fetchPortfolioPerformanceFailure,
 	fetchBacktestConfigRequest,
 	fetchBacktestConfigSuccess,
-	fetchBacktestConfigFailure,
 	cloneRunRequest,
+	backtestActionFailure,
 } from "./reducer";
 
 function* fetchBacktestsEffect(
@@ -78,7 +64,7 @@ function* fetchBacktestsEffect(
 		yield put(fetchBacktestsSuccess(data));
 	} catch (e: any) {
 		yield put(
-			fetchBacktestsFailure(
+			backtestActionFailure(
 				e?.response?.data?.detail ?? "Failed to load backtests"
 			)
 		);
@@ -93,7 +79,7 @@ function* fetchBacktestEffect(
 		yield put(fetchBacktestSuccess(bt));
 	} catch (e: any) {
 		yield put(
-			fetchBacktestFailure(
+			backtestActionFailure(
 				e?.response?.data?.detail ?? "Failed to load backtest"
 			)
 		);
@@ -108,7 +94,7 @@ function* createBacktestEffect(
 		yield put(createBacktestSuccess(id));
 	} catch (e: any) {
 		yield put(
-			createBacktestFailure(
+			backtestActionFailure(
 				e?.response?.data?.detail ?? "Failed to create backtest"
 			)
 		);
@@ -124,7 +110,11 @@ function* updateBacktestEffect(
 		yield put(updateBacktestSuccess(id));
 		yield put(fetchBacktestsRequest());
 	} catch (e: any) {
-		yield put(updateBacktestFailure(id));
+		yield put(
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to update backtest"
+			)
+		);
 	}
 }
 
@@ -136,7 +126,11 @@ function* deleteBacktestEffect(
 		yield call(deleteBacktestApi, id);
 		yield put(deleteBacktestSuccess(id));
 	} catch (e: any) {
-		yield put(deleteBacktestFailure(id));
+		yield put(
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to update backtest"
+			)
+		);
 	}
 }
 
@@ -146,7 +140,7 @@ function* fetchRunsEffect(action: ReturnType<typeof fetchRunsRequest>): any {
 		yield put(fetchRunsSuccess(runs));
 	} catch (e: any) {
 		yield put(
-			fetchRunsFailure(e?.response?.data?.detail ?? "Failed to load runs")
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to load runs")
 		);
 	}
 }
@@ -161,7 +155,7 @@ function* createRunEffect(action: ReturnType<typeof createRunRequest>): any {
 		yield put(createRunSuccess(created));
 	} catch (e: any) {
 		yield put(
-			createRunFailure(e?.response?.data?.detail ?? "Failed to create run")
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to create run")
 		);
 	}
 }
@@ -176,7 +170,7 @@ function* cloneRunEffect(action: ReturnType<typeof cloneRunRequest>): any {
 		yield put(createRunSuccess(created));
 	} catch (e: any) {
 		yield put(
-			createRunFailure(e?.response?.data?.detail ?? "Failed to create run")
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to create run")
 		);
 	}
 }
@@ -195,7 +189,9 @@ function* deleteRunEffect(action: ReturnType<typeof deleteRunRequest>): any {
 		yield call(deleteRunApi, backtestId, runId);
 		yield put(deleteRunSuccess(runId));
 	} catch (e: any) {
-		yield put(deleteRunFailure(runId));
+		yield put(
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to delete run")
+		);
 	}
 }
 
@@ -204,49 +200,11 @@ function* executeRunEffect(action: ReturnType<typeof executeRunRequest>): any {
 	try {
 		// Avvia in background (202) — ritorna subito
 		yield call(executeRunApi, backtestId, runId);
-
-		// Polling ogni 2s finché status != RUNNING
-		while (true) {
-			yield delay(2000);
-			const run = yield call(getRunApi, backtestId, runId);
-			yield put(fetchRunDetailSuccess(run));
-
-			// Prendi il backtest dal reducer per sapere la frequency
-			const state: any = yield select();
-			const backtest = state.backtest.current;
-
-			// Carica i dati corretti in base al tipo di backtest
-			if (backtest?.frequency === "EOM") {
-				// LONG: carica i pesi
-				try {
-					const weights = yield call(getRunWeightsApi, backtestId, runId);
-					yield put(fetchRunWeightsSuccess(weights));
-				} catch {}
-			} else if (backtest?.frequency === "EOD") {
-				// OPTION/SHORT: carica le performances
-				yield put(
-					fetchPortfolioPerformanceRequest({
-						backtestId,
-						runId,
-						page: 1,
-						limit: 20,
-					})
-				);
-			}
-
-			if (run.status !== "RUNNING") break;
-		}
-
-		// Fetch finale ritardato per assicurarsi che i metriche siano calcolati
-		yield delay(1000);
-		try {
-			const finalRun = yield call(getRunApi, backtestId, runId);
-			yield put(fetchRunDetailSuccess(finalRun));
-		} catch {}
-
 		yield put(executeRunSuccess(runId));
 	} catch (e: any) {
-		yield put(executeRunFailure(runId));
+		yield put(
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to exec run")
+		);
 	}
 }
 
@@ -256,7 +214,9 @@ function* stopRunEffect(action: ReturnType<typeof stopRunRequest>): any {
 		yield call(stopRunApi, backtestId, runId);
 		yield put(stopRunSuccess());
 	} catch (e: any) {
-		yield put(stopRunFailure());
+		yield put(
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to stop run")
+		);
 	}
 }
 
@@ -267,8 +227,12 @@ function* invalidateRunEffect(
 	try {
 		yield call(invalidateRunApi, backtestId, runId);
 		yield put(invalidateRunSuccess(runId));
-	} catch {
-		yield put(invalidateRunFailure());
+	} catch (e: any) {
+		yield put(
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to invalidate run"
+			)
+		);
 	}
 }
 
@@ -281,7 +245,7 @@ function* fetchRunDetailEffect(
 		yield put(fetchRunDetailSuccess(run));
 	} catch (e: any) {
 		yield put(
-			fetchRunDetailFailure(e?.response?.data?.detail ?? "Failed to load run")
+			backtestActionFailure(e?.response?.data?.detail ?? "Failed to load run")
 		);
 	}
 }
@@ -295,7 +259,7 @@ function* fetchRunWeightsEffect(
 		yield put(fetchRunWeightsSuccess(weights));
 	} catch (e: any) {
 		yield put(
-			fetchRunWeightsFailure(
+			backtestActionFailure(
 				e?.response?.data?.detail ?? "Failed to load weights"
 			)
 		);
@@ -308,8 +272,12 @@ function* fetchBacktestConfigEffect(
 	try {
 		const config = yield call(getBacktestConfigApi, action.payload);
 		yield put(fetchBacktestConfigSuccess(config));
-	} catch {
-		yield put(fetchBacktestConfigFailure());
+	} catch (e: any) {
+		yield put(
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to load backtest config"
+			)
+		);
 	}
 }
 
@@ -328,8 +296,8 @@ function* fetchPortfolioPerformancesEffect(
 		yield put(fetchPortfolioPerformanceSuccess(data));
 	} catch (e: any) {
 		yield put(
-			fetchPortfolioPerformanceFailure(
-				e?.response?.data?.detail ?? "Failed to load portfolio performances"
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to load portfolio performance"
 			)
 		);
 	}

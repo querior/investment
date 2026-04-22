@@ -169,30 +169,21 @@ export type BacktestState = {
 	page: number;
 	loading: boolean;
 	error: string | null;
-	// create backtest
-	creating: boolean;
-	createError: string | null;
 	lastCreatedId: number | null;
 	// current backtest detail
 	current: BacktestDto | null;
-	currentLoading: boolean;
 	// runs for current backtest
 	runs: BacktestRunDto[];
-	runsLoading: boolean;
-	// create/execute run
-	creatingRun: boolean;
 	executingRunId: number | null;
 	invalidatingRunId: number | null;
 	// run detail
 	currentRun: BacktestRunDto | null;
-	currentRunLoading: boolean;
 	runWeights: RunWeightDto[];
-	runWeightsLoading: boolean;
 	portfolioPerformances: PortfolioPerformanceState;
+	positionLoading: boolean;
 	positions: PositionsState;
 	// backtest config
 	backtestConfig: BacktestConfigDto | null;
-	backtestConfigLoading: boolean;
 };
 
 export const STATUS_BADGE: Record<

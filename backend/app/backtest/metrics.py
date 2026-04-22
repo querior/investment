@@ -1,5 +1,9 @@
 import math
 import numpy as np
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 def compute_metrics(nav_series: list[float]) -> dict:
@@ -95,4 +99,72 @@ def compute_run_eod_metrics(nav_series: list[float], return_series: list[float])
         "win_rate": win_rate,
         "profit_factor": profit_factor,
         "n_trades": None,  # lo valorizzi a parte
+    }
+
+
+def compute_ev_accuracy(db: "Session", run_id: int) -> dict:
+    """
+    Confronta EV stimato all'entry con P&L realizzato sulle posizioni chiuse.
+
+    Metriche:
+    - n_positions: posizioni chiuse con dati EV
+    - mean_ev_net: EV netto medio stimato all'entry
+    - mean_realized_pnl: P&L medio realizzato
+    - ev_accuracy: mean_realized_pnl / mean_ev_net (1.0 = perfetto)
+    - actual_win_rate: % posizioni chiuse in profitto
+    - mean_entry_prob_profit: PoP stimata media all'entry
+    - pop_bias: actual_win_rate - mean_entry_prob_profit (bias della stima)
+    - cost_drag: mean_transaction_costs / mean_abs_initial_value
+    """
+    from app.backtest.schemas.backtest_position import BacktestPosition
+
+    rows = (
+        db.query(BacktestPosition)
+        .filter(
+            BacktestPosition.run_id == run_id,
+            BacktestPosition.status == "CLOSED",
+            BacktestPosition.entry_ev_net.isnot(None),
+        )
+        .all()
+    )
+
+    n = len(rows)
+    if n == 0:
+        return {"n_positions": 0}
+
+    ev_nets = [r.entry_ev_net for r in rows]
+    realized_pnls = [r.realized_pnl for r in rows if r.realized_pnl is not None]
+    prob_profits = [r.entry_prob_profit for r in rows if r.entry_prob_profit is not None]
+    transaction_costs = [r.entry_transaction_costs for r in rows if r.entry_transaction_costs is not None]
+    initial_values = [r.initial_value for r in rows]
+
+    mean_ev_net = float(np.mean(ev_nets))
+    mean_realized_pnl = float(np.mean(realized_pnls)) if realized_pnls else None
+    actual_win_rate = float(np.mean([1 if p > 0 else 0 for p in realized_pnls])) if realized_pnls else None
+    mean_entry_prob_profit = float(np.mean(prob_profits)) if prob_profits else None
+    mean_transaction_costs = float(np.mean(transaction_costs)) if transaction_costs else None
+    mean_abs_initial_value = float(np.mean([abs(v) for v in initial_values]))
+
+    ev_accuracy = None
+    if mean_realized_pnl is not None and mean_ev_net != 0:
+        ev_accuracy = mean_realized_pnl / mean_ev_net
+
+    pop_bias = None
+    if actual_win_rate is not None and mean_entry_prob_profit is not None:
+        pop_bias = actual_win_rate - mean_entry_prob_profit
+
+    cost_drag = None
+    if mean_transaction_costs is not None and mean_abs_initial_value != 0:
+        cost_drag = mean_transaction_costs / mean_abs_initial_value
+
+    return {
+        "n_positions": n,
+        "mean_ev_net": mean_ev_net,
+        "mean_realized_pnl": mean_realized_pnl,
+        "ev_accuracy": ev_accuracy,
+        "actual_win_rate": actual_win_rate,
+        "mean_entry_prob_profit": mean_entry_prob_profit,
+        "pop_bias": pop_bias,
+        "mean_transaction_costs": mean_transaction_costs,
+        "cost_drag": cost_drag,
     }

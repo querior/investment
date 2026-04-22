@@ -10,6 +10,7 @@ from app.backtest.schemas.option_strategy import OptionStrategy
 from app.backtest.schemas.backtest_position import BacktestPosition
 from app.backtest.schemas.backtest_position_snapshot import BacktestPositionSnapshot
 from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
+from app.backtest.schemas.instrument_config import InstrumentConfig
 
 _TABLES = [
     Backtest.__table__,
@@ -21,7 +22,83 @@ _TABLES = [
     BacktestPosition.__table__,
     BacktestPositionSnapshot.__table__,
     BacktestPortfolioPerformance.__table__,
+    InstrumentConfig.__table__,
 ]
+
+_INSTRUMENT_SEED = [
+    {
+        "ticker": "IWM",
+        "name": "iShares Russell 2000 ETF",
+        "dividend_yield": 0.015,
+        "iv_proxy": "RVX",
+        "iv_alpha": 4.0,
+        "contract_multiplier": 100,
+        "settlement": "physical",
+        "iv_min": 0.10,
+        "iv_max": 0.80,
+        "commission_per_contract": 0.65,
+        "min_commission": 1.00,
+        "bid_ask_spread_pct": 0.02,
+    },
+    {
+        "ticker": "SPY",
+        "name": "SPDR S&P 500 ETF",
+        "dividend_yield": 0.013,
+        "iv_proxy": "VIX",
+        "iv_alpha": 3.2,
+        "contract_multiplier": 100,
+        "settlement": "physical",
+        "iv_min": 0.10,
+        "iv_max": 0.80,
+        "commission_per_contract": 0.65,
+        "min_commission": 1.00,
+        "bid_ask_spread_pct": 0.01,
+    },
+    {
+        "ticker": "QQQ",
+        "name": "Invesco QQQ Trust",
+        "dividend_yield": 0.006,
+        "iv_proxy": "VXN",
+        "iv_alpha": 4.5,
+        "contract_multiplier": 100,
+        "settlement": "physical",
+        "iv_min": 0.10,
+        "iv_max": 0.80,
+        "commission_per_contract": 0.65,
+        "min_commission": 1.00,
+        "bid_ask_spread_pct": 0.015,
+    },
+    {
+        "ticker": "SPX",
+        "name": "S&P 500 Index",
+        "dividend_yield": 0.013,
+        "iv_proxy": "VIX",
+        "iv_alpha": 3.2,
+        "contract_multiplier": 100,
+        "settlement": "cash",
+        "iv_min": 0.10,
+        "iv_max": 0.80,
+        "commission_per_contract": 1.00,
+        "min_commission": 1.00,
+        "bid_ask_spread_pct": 0.005,
+    },
+]
+
+
+def _seed_instruments(conn) -> None:
+    for row in _INSTRUMENT_SEED:
+        conn.execute(text("""
+            INSERT INTO instrument_configs (
+                ticker, name, dividend_yield, iv_proxy, iv_alpha,
+                contract_multiplier, settlement, iv_min, iv_max,
+                commission_per_contract, min_commission, bid_ask_spread_pct
+            ) VALUES (
+                :ticker, :name, :dividend_yield, :iv_proxy, :iv_alpha,
+                :contract_multiplier, :settlement, :iv_min, :iv_max,
+                :commission_per_contract, :min_commission, :bid_ask_spread_pct
+            )
+            ON CONFLICT (ticker) DO NOTHING
+        """), row)
 
 
 def init_backtest_db(reset: bool = False) -> None:
@@ -100,4 +177,13 @@ def init_backtest_db(reset: bool = False) -> None:
                         FOREIGN KEY (run_id) REFERENCES backtest_runs(id) ON DELETE CASCADE;
                 END IF;
             END $$;
+            -- Colonne EV su backtest_positions
+            ALTER TABLE backtest_positions
+                ADD COLUMN IF NOT EXISTS entry_ev_gross          FLOAT,
+                ADD COLUMN IF NOT EXISTS entry_ev_net            FLOAT,
+                ADD COLUMN IF NOT EXISTS entry_prob_profit       FLOAT,
+                ADD COLUMN IF NOT EXISTS entry_transaction_costs FLOAT,
+                ADD COLUMN IF NOT EXISTS entry_fair_value        FLOAT;
         """))
+    with engine.begin() as conn:
+        _seed_instruments(conn)

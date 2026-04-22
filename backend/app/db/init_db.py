@@ -27,6 +27,24 @@ def init_db():
 def _migrate() -> None:
     with engine.begin() as conn:
         conn.execute(text("""
+            -- Aggiunge entry_conditions e exit_conditions a backtest_positions
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'backtest_positions' AND column_name = 'entry_conditions'
+                ) THEN
+                    ALTER TABLE backtest_positions
+                        ADD COLUMN entry_conditions JSONB;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'backtest_positions' AND column_name = 'exit_conditions'
+                ) THEN
+                    ALTER TABLE backtest_positions
+                        ADD COLUMN exit_conditions JSONB;
+                END IF;
+            END $$;
             -- Rinomina allocation_parameters → backtest_parameters
             DO $$
             BEGIN

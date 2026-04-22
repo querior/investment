@@ -19,6 +19,7 @@ from app.backtest.schemas.backtest_run import BacktestFrequency, BacktestRun, Ba
 from app.backtest.schemas.backtest_weight import BacktestWeight
 from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
 from app.db.allocation_history import AllocationHistory
+from app.backtest.parameter_schema import validate_parameters, PARAMETER_SCHEMA
 from datetime import datetime
 import logging
 
@@ -54,6 +55,32 @@ def _serialize_backtest(bt: Backtest) -> dict:
 
 def _serialize_run(run: BacktestRun, db: Session) -> dict:
     params = db.query(BacktestRunParameter).filter(BacktestRunParameter.run_id == run.id).all()
+    params_dict = {p.key: {"value": p.value, "unit": p.unit} for p in params}
+
+    # Ensure all parameters from schema are present
+    # If missing, add them to DB with default values
+    missing_keys = []
+    for key, schema in PARAMETER_SCHEMA.items():
+        if key not in params_dict:
+            default_value = schema.get("default")
+            if default_value is not None:
+                # Add to dict for this response
+                unit = schema.get("unit", "value")
+                params_dict[key] = {"value": default_value, "unit": unit}
+                # Also add to DB so future queries get it
+                missing_keys.append((key, default_value, unit))
+
+    # Bulk insert missing parameters
+    if missing_keys:
+        for key, value, unit in missing_keys:
+            db.add(BacktestRunParameter(
+                run_id=cast(int, run.id),
+                key=key,
+                value=str(value),
+                unit=unit
+            ))
+        db.commit()
+
     return {
         "id": run.id,
         "backtest_id": run.backtest_id,
@@ -74,7 +101,7 @@ def _serialize_run(run: BacktestRun, db: Session) -> dict:
         "n_trades": run.n_trades,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
-        "parameters": {p.key: {"value": p.value, "unit": p.unit} for p in params},
+        "parameters": params_dict,
     }
 
 
@@ -99,9 +126,22 @@ def update_allocation_parameter(key: str, req: UpdateParameterRequest, db: Sessi
 @router.get("/backtests/{backtest_id}/config")
 def get_backtest_config(backtest_id: int, db: Session = Depends(get_db)):
     bt = _get_backtest_or_404(backtest_id, db)
-    
+
     logger.warning(f"frequency: {bt.frequency} - instrument: {bt.instrument}")
-    
+
+    # Build parameter schema for frontend
+    param_schema = {
+        key: {
+            "type": schema.get("type"),
+            "min": schema.get("min"),
+            "max": schema.get("max"),
+            "default": schema.get("default"),
+            "unit": schema.get("unit"),
+            "precision": schema.get("precision"),
+        }
+        for key, schema in PARAMETER_SCHEMA.items()
+    }
+
     if bt.frequency == BacktestFrequency.EOM.value:
         adjustments = db.query(AllocationAdjustment).order_by(
             AllocationAdjustment.pillar, AllocationAdjustment.regime, AllocationAdjustment.asset
@@ -114,12 +154,16 @@ def get_backtest_config(backtest_id: int, db: Session = Depends(get_db)):
                 {"pillar": a.pillar, "regime": a.regime, "asset": a.asset, "delta": a.delta}
                 for a in adjustments
             ],
+            "parameterSchema": param_schema,
         }
     if (bt.frequency == BacktestFrequency.EOD.value or  bt.frequency == BacktestFrequency.EOW.value) and bt.instrument == 'options':
         optionsParameters = db.query(BacktestParameter).filter(BacktestParameter.backtest_id == backtest_id).all()
-        return optionsParameters
-        
-    return {}
+        return {
+            "optionsParameters": optionsParameters,
+            "parameterSchema": param_schema,
+        }
+
+    return {"parameterSchema": param_schema}
 
 
 # ---------------------------------------------------------------------------
@@ -287,14 +331,12 @@ def create_run(backtest_id: int, req: CreateRunRequest, db: Session = Depends(ge
         _upsert_run_parameter(db, run_id, "initial_allocation", req.initial_allocation)
         
     if (bt.frequency == BacktestFrequency.EOD or bt.frequency == BacktestFrequency.EOW) and bt.instrument == BacktestInstrument.OPTIONS.value:
-        # Copy global defaults into per-run parameters
-        _upsert_run_parameter(db, run_id, "symbol", "IWM", unit="value")
-        _upsert_run_parameter(db, run_id, "max_risk", "5", unit="pct")
-        _upsert_run_parameter(db, run_id, "initial_capital", "10000", unit="value")
-        _upsert_run_parameter(db, run_id, "entry_every_n_days", "30", unit="value")
-        _upsert_run_parameter(db, run_id, "alpha_volatility", "4", unit="value")
-        _upsert_run_parameter(db, run_id, "iv_min", "0.10", unit="pct")
-        _upsert_run_parameter(db, run_id, "iv_max", "0.80", unit="pct")
+        # Populate ALL parameters from schema with their defaults
+        for key, schema in PARAMETER_SCHEMA.items():
+            default_value = schema.get("default")
+            if default_value is not None:
+                unit = schema.get("unit", "value")
+                _upsert_run_parameter(db, run_id, key, str(default_value), unit=unit)
         
     db.commit()
     db.refresh(run)
@@ -345,6 +387,12 @@ def update_run(backtest_id: int, run_id: int, req: UpdateRunRequest, db: Session
     if req.notes is not None:
         run.notes = req.notes  # type: ignore[assignment]
     if req.parameters:
+        errors = validate_parameters(req.parameters)
+        if errors:
+            raise HTTPException(
+                status_code=400,
+                detail={"errors": errors}
+            )
         for key, value in req.parameters.items():
             _upsert_run_parameter(db, cast(int, run.id), key, value)
     db.commit()
@@ -456,6 +504,13 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/backtests/{backtest_id}/runs/{run_id}/ev-accuracy")
+def run_ev_accuracy(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
+    from app.backtest.metrics import compute_ev_accuracy
+    _get_run_or_404(backtest_id, run_id, db)
+    return compute_ev_accuracy(db, run_id)
+
+
 @router.get("/backtests/{backtest_id}/runs/{run_id}/positions")
 def run_portfolio_performances(backtest_id: int, run_id: int, page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
     _get_run_or_404(backtest_id, run_id, db)
@@ -535,6 +590,78 @@ def run_portfolio_performances(backtest_id: int, run_id: int, page: int = 1, lim
     }
 
 
+def _format_entry_criteria(entry_conditions: dict) -> list[str]:
+    """Format entry conditions into human-readable criteria."""
+    if not entry_conditions:
+        return []
+
+    criteria = []
+
+    if entry_conditions.get("macro_regime"):
+        criteria.append(f"Macro: {entry_conditions['macro_regime']}")
+
+    if entry_conditions.get("trend"):
+        criteria.append(f"Trend: {entry_conditions['trend']}")
+
+    if entry_conditions.get("iv_rv_ratio"):
+        criteria.append(f"IV/RV: {entry_conditions['iv_rv_ratio']:.2f}")
+
+    if entry_conditions.get("rsi_14") is not None:
+        criteria.append(f"RSI: {entry_conditions['rsi_14']:.2f}")
+
+    if entry_conditions.get("macd") is not None:
+        criteria.append(f"MACD: {entry_conditions['macd']:.4f}")
+
+    if entry_conditions.get("iv"):
+        criteria.append(f"IV: {entry_conditions['iv']:.2%}")
+
+    if entry_conditions.get("underlying_price"):
+        criteria.append(f"Price: {entry_conditions['underlying_price']:.2f}")
+
+    return criteria
+
+
+def _format_exit_criteria(exit_conditions: dict) -> list[str]:
+    """Format exit conditions with actual data that triggered the exit."""
+    if not exit_conditions:
+        return []
+
+    criteria = []
+
+    # If exit_conditions has 'triggered_by' (new format), format with actual data
+    if "triggered_by" in exit_conditions:
+        reason = exit_conditions.get("reason", "Unknown exit reason")
+        criteria.append(reason)
+
+        # Add key data points from exit_conditions["data"]
+        data = exit_conditions.get("data", {})
+        if data.get("current_pnl") is not None:
+            criteria.append(f"P&L: {data['current_pnl']:.2f} ({data.get('pnl_pct', 0):.1f}%)")
+
+        if data.get("dte") is not None:
+            criteria.append(f"DTE: {data['dte']:.0f} days")
+
+        if data.get("macro_regime"):
+            criteria.append(f"Macro Regime: {data['macro_regime']}")
+
+        if data.get("rsi_14") is not None:
+            criteria.append(f"RSI: {data['rsi_14']:.2f}")
+
+        if data.get("macd") is not None:
+            criteria.append(f"MACD: {data['macd']:.4f}")
+
+        if data.get("iv_rv_ratio") is not None:
+            criteria.append(f"IV/RV: {data['iv_rv_ratio']:.2f}")
+
+        if data.get("position_delta") is not None:
+            criteria.append(f"Delta: {data['position_delta']:.4f}")
+
+        if data.get("position_theta") is not None:
+            criteria.append(f"Theta: {data['position_theta']:.4f}")
+
+    return criteria
+
+
 @router.get("/backtests/{backtest_id}/runs/{run_id}/positions/{position_id}/history")
 def position_history(backtest_id: int, run_id: int, position_id: int, db: Session = Depends(get_db)):
     _get_run_or_404(backtest_id, run_id, db)
@@ -558,19 +685,41 @@ def position_history(backtest_id: int, run_id: int, position_id: int, db: Sessio
         .all()
     )
 
-    return [
-        {
-            "snapshot_date": s.snapshot_date,
-            "underlying_price": s.underlying_price,
-            "iv": s.iv,
-            "position_price": s.position_price,
-            "position_pnl": s.position_pnl,
-            "position_delta": s.position_delta,
-            "position_gamma": s.position_gamma,
-            "position_theta": s.position_theta,
-            "position_vega": s.position_vega,
-            "min_dte": s.min_dte,
-            "is_open": s.is_open,
-        }
-        for s in snapshots
-    ]
+    # Format actual entry and exit criteria from position data
+    entry_criteria = _format_entry_criteria(position.entry_conditions or {})
+    exit_criteria = _format_exit_criteria(position.exit_conditions or {})
+
+    return {
+        "header": {
+            "position_id": position.id,
+            "position_type": position.position_type,
+            "strategy_name": position.strategy.name if position.strategy else None,
+            "status": position.status,
+            "opened_at": position.opened_at,
+            "closed_at": position.closed_at,
+            "entry_underlying": position.entry_underlying,
+            "entry_iv": position.entry_iv,
+            "entry_macro_regime": position.entry_macro_regime,
+            "initial_value": position.initial_value,
+            "close_value": position.close_value,
+            "realized_pnl": position.realized_pnl,
+            "entry_criteria": entry_criteria,
+            "exit_criteria": exit_criteria,
+        },
+        "snapshots": [
+            {
+                "snapshot_date": s.snapshot_date,
+                "underlying_price": s.underlying_price,
+                "iv": s.iv,
+                "position_price": s.position_price,
+                "position_pnl": s.position_pnl,
+                "position_delta": s.position_delta,
+                "position_gamma": s.position_gamma,
+                "position_theta": s.position_theta,
+                "position_vega": s.position_vega,
+                "min_dte": s.min_dte,
+                "is_open": s.is_open,
+            }
+            for s in snapshots
+        ]
+    }

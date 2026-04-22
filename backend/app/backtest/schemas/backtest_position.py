@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Optional
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, func, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 if TYPE_CHECKING:
@@ -36,6 +36,15 @@ class BacktestPosition(Base):
     initial_value: Mapped[float] = mapped_column(Float, nullable=False)
     close_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    entry_conditions: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    exit_conditions: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    entry_fair_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_ev_gross: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_ev_net: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_prob_profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_transaction_costs: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

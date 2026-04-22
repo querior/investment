@@ -10,7 +10,6 @@ import {
 	formatNumber,
 	formatDelta,
 } from "../../../utils/number";
-import { useEffect } from "react";
 import { PositionHistoryExpandedRow } from "./PositionHistoryExpandedRow";
 
 function buildPositionsColumns(): ColumnsType<BacktestPositionDto> {
@@ -21,9 +20,7 @@ function buildPositionsColumns(): ColumnsType<BacktestPositionDto> {
 			width: 120,
 			render: (_: unknown, row: BacktestPositionDto) =>
 				row.strategy_acronym ? (
-					<Tag color={row.strategy_color}>
-						{row.strategy_acronym}
-					</Tag>
+					<Tag color={row.strategy_color}>{row.strategy_acronym}</Tag>
 				) : (
 					<span className="text-gray-500">{row.position_type}</span>
 				),
@@ -80,43 +77,35 @@ function buildPositionsColumns(): ColumnsType<BacktestPositionDto> {
 			key: "close_value",
 			width: 110,
 			render: (_: unknown, row: BacktestPositionDto) =>
-				row.close_value !== null
-					? formatCurrency(row.close_value)
-					: "-",
+				row.close_value !== null ? formatCurrency(row.close_value) : "-",
 		},
 		{
 			title: "Realized P&L",
 			key: "realized_pnl",
 			width: 110,
 			render: (_: unknown, row: BacktestPositionDto) =>
-				row.realized_pnl !== null
-					? formatDelta(row.realized_pnl)
-					: "-",
+				row.realized_pnl !== null ? formatDelta(row.realized_pnl) : "-",
 		},
 		{
 			title: "Unrealized P&L",
 			key: "unrealized_pnl",
 			width: 110,
 			render: (_: unknown, row: BacktestPositionDto) =>
-				row.unrealized_pnl !== null
-					? formatDelta(row.unrealized_pnl)
-					: "-",
+				row.unrealized_pnl !== null ? formatDelta(row.unrealized_pnl) : "-",
 		},
 		{
 			title: "Return %",
 			key: "performance_pct",
 			width: 100,
 			render: (_: unknown, row: BacktestPositionDto) =>
-				row.performance_pct !== null
-					? formatPercent(row.performance_pct)
-					: "-",
+				row.performance_pct !== null ? formatPercent(row.performance_pct) : "-",
 		},
 	];
 }
 
 const PortfolioPerformanceTable = () => {
 	const dispatch = useDispatch();
-	const { positions, currentRun, loading, current } = useSelector(
+	const { positions, currentRun, positionLoading, current } = useSelector(
 		(state: RootState) => state.backtest
 	);
 
@@ -137,18 +126,6 @@ const PortfolioPerformanceTable = () => {
 		}
 	};
 
-	useEffect(() => {
-		if (!currentRun) return;
-		dispatch(
-			fetchPortfolioPerformanceRequest({
-				backtestId: currentRun.backtest_id,
-				runId: currentRun.id,
-				page: 1,
-				limit: 20,
-			})
-		);
-	}, [currentRun?.updated_at, dispatch]);
-
 	return (
 		<Card size="small" title="Positions">
 			<Table
@@ -156,7 +133,7 @@ const PortfolioPerformanceTable = () => {
 				size="small"
 				columns={buildPositionsColumns()}
 				dataSource={positions.items}
-				loading={loading}
+				loading={positionLoading}
 				expandable={{
 					expandedRowRender: (record) =>
 						backtestId && runId ? (
