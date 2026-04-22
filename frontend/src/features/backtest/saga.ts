@@ -11,9 +11,11 @@ import {
 	executeRunApi,
 	stopRunApi,
 	getRunApi,
+	getRunStatusApi,
 	getRunWeightsApi,
 	updateRunApi,
 	getBacktestConfigApi,
+	getRunNavApi,
 	invalidateRunApi,
 	cloneRunApi,
 	getPortfolioPerformancesApi,
@@ -45,8 +47,12 @@ import {
 	invalidateRunSuccess,
 	fetchRunDetailRequest,
 	fetchRunDetailSuccess,
+	fetchRunStatusRequest,
+	fetchRunStatusSuccess,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
+	fetchRunNavRequest,
+	fetchRunNavSuccess,
 	fetchPortfolioPerformanceRequest,
 	fetchPortfolioPerformanceSuccess,
 	fetchBacktestConfigRequest,
@@ -199,8 +205,14 @@ function* executeRunEffect(action: ReturnType<typeof executeRunRequest>): any {
 	const { backtestId, runId } = action.payload;
 	try {
 		// Avvia in background (202) — ritorna subito
-		yield call(executeRunApi, backtestId, runId);
-		yield put(executeRunSuccess(runId));
+		const response: { id: number; status: string } = yield call(
+			executeRunApi,
+			backtestId,
+			runId
+		);
+		yield put(
+			executeRunSuccess({ runId: response.id, status: response.status })
+		);
 	} catch (e: any) {
 		yield put(
 			backtestActionFailure(e?.response?.data?.detail ?? "Failed to exec run")
@@ -281,6 +293,31 @@ function* fetchBacktestConfigEffect(
 	}
 }
 
+function* fetchRunNavEffect(
+	action: ReturnType<typeof fetchRunNavRequest>
+): any {
+	const { backtestId, runId } = action.payload;
+	try {
+		const navData = yield call(getRunNavApi, backtestId, runId);
+		yield put(fetchRunNavSuccess(navData));
+	} catch (e: any) {
+		// Silently fail for nav polling — don't show error
+		// Nav is auxiliary data and polling failures shouldn't interrupt UX
+	}
+}
+
+function* fetchRunStatusEffect(
+	action: ReturnType<typeof fetchRunStatusRequest>
+): any {
+	const { backtestId, runId } = action.payload;
+	try {
+		const status = yield call(getRunStatusApi, backtestId, runId);
+		yield put(fetchRunStatusSuccess(status));
+	} catch (e: any) {
+		// Silently fail for status polling — don't show error
+	}
+}
+
 function* fetchPortfolioPerformancesEffect(
 	action: ReturnType<typeof fetchPortfolioPerformanceRequest>
 ): any {
@@ -318,7 +355,9 @@ export function* backtestWatcher() {
 	yield takeLatest(stopRunRequest.type, stopRunEffect);
 	yield takeLatest(invalidateRunRequest.type, invalidateRunEffect);
 	yield takeLatest(fetchRunDetailRequest.type, fetchRunDetailEffect);
+	yield takeLatest(fetchRunStatusRequest.type, fetchRunStatusEffect);
 	yield takeLatest(fetchRunWeightsRequest.type, fetchRunWeightsEffect);
+	yield takeLatest(fetchRunNavRequest.type, fetchRunNavEffect);
 	yield takeLatest(
 		fetchPortfolioPerformanceRequest.type,
 		fetchPortfolioPerformancesEffect

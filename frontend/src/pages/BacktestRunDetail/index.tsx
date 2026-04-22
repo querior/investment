@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import {
 	fetchRunDetailRequest,
+	fetchRunStatusRequest,
 	fetchRunWeightsRequest,
 	fetchBacktestConfigRequest,
 	fetchBacktestRequest,
@@ -32,11 +33,11 @@ import {
 	updateRunRequest,
 	invalidateRunRequest,
 	fetchPortfolioPerformanceRequest,
+	fetchRunNavRequest,
 } from "../../features/backtest/reducer";
 import type { RootState } from "../../store/reducers";
 import Chart from "../../components/charts/Chart";
 
-import { getRunNavApi } from "../../services/backtest-service";
 import { BacktestStatus, FrequencyType } from "../../features/backtest/types";
 import { capitalize } from "../../utils/string";
 import RegimeAdjustmentsCard from "./Long/RegimeAdjustmentCard";
@@ -68,15 +69,13 @@ export default function BacktestRunDetail() {
 
 	const {
 		current: currentBacktest,
-		loading,
 		currentRun,
-		executingRunId,
 		invalidatingRunId,
 		backtestConfig,
+		navData,
 	} = useSelector((state: RootState) => state.backtest);
 
 	const isRunning = currentRun?.status === "RUNNING";
-	const [navData, setNavData] = useState<{ date: string; nav: number }[]>([]);
 
 	// Polling for portfolio performance during execution
 	const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -96,6 +95,33 @@ export default function BacktestRunDetail() {
 				runId: runIdNum,
 			})
 		);
+		dispatch(
+			fetchRunNavRequest({
+				backtestId,
+				runId: runIdNum,
+			})
+		);
+	};
+
+	const pollData = () => {
+		dispatch(
+			fetchRunStatusRequest({
+				backtestId,
+				runId: runIdNum,
+			})
+		);
+		dispatch(
+			fetchPortfolioPerformanceRequest({
+				backtestId,
+				runId: runIdNum,
+			})
+		);
+		dispatch(
+			fetchRunNavRequest({
+				backtestId,
+				runId: runIdNum,
+			})
+		);
 	};
 
 	const handleExecute = () => {
@@ -105,10 +131,6 @@ export default function BacktestRunDetail() {
 	const handleStop = () => {
 		dispatch(stopRunRequest({ backtestId, runId: runIdNum }));
 	};
-
-	const isDone = currentRun?.status === "DONE";
-
-	type ParamDraft = Record<string, string | number>;
 
 	const [isEditingParams, setIsEditingParams] = useState(false);
 
@@ -190,13 +212,12 @@ export default function BacktestRunDetail() {
 			if (pollingIntervalRef.current) {
 				clearInterval(pollingIntervalRef.current);
 				pollingIntervalRef.current = null;
-				setTimeout(() => refreshData(), 2000);
 			}
 			return;
 		}
 
 		if (!pollingIntervalRef.current)
-			pollingIntervalRef.current = setInterval(refreshData, 5000);
+			pollingIntervalRef.current = setInterval(pollData, 5000);
 
 		return () => {
 			if (pollingIntervalRef.current) {
@@ -204,22 +225,11 @@ export default function BacktestRunDetail() {
 				pollingIntervalRef.current = null;
 			}
 		};
-	}, [
-		currentRun?.status,
-		currentBacktest?.frequency,
-		runIdNum,
-		backtestId,
-		refreshData,
-	]);
-
-	useEffect(() => {
-		if (!currentRun) return;
-		getRunNavApi(backtestId, runIdNum)
-			.then(setNavData)
-			.catch(() => {});
-	}, [currentRun?.updated_at, backtestId, runIdNum]);
+	}, [currentRun?.status, currentBacktest?.frequency, runIdNum, backtestId]);
 
 	useEffect(refreshData, []);
+
+	if (!currentRun) return <Skeleton active />;
 
 	return (
 		<div className="p-6 flex flex-col gap-6">
@@ -231,293 +241,284 @@ export default function BacktestRunDetail() {
 				Back
 			</Button>
 
-			{loading || !currentRun ? (
-				<Skeleton active />
-			) : (
-				<>
-					{/* Info + execute */}
-					<Card
-						size="small"
-						extra={
-							isRunning ? (
-								<Button danger icon={<BorderOutlined />} onClick={handleStop}>
-									Stop
-								</Button>
-							) : (
-								<div className="flex gap-2">
-									{(currentRun.status === "DONE" ||
-										currentRun.status === "ERROR" ||
-										currentRun.status === "STOPPED") && (
-										<Popconfirm
-											title="Cancella i risultati e riporta il run a READY?"
-											okText="Reset"
-											okButtonProps={{ danger: true }}
-											cancelText="Annulla"
-											onConfirm={() =>
-												dispatch(
-													invalidateRunRequest({ backtestId, runId: runIdNum })
-												)
-											}
-										>
-											<Button
-												icon={<ReloadOutlined />}
-												loading={invalidatingRunId === runIdNum}
-											>
-												Reset
-											</Button>
-										</Popconfirm>
-									)}
+			{/* Info + execute */}
+			<Card
+				size="small"
+				extra={
+					isRunning ? (
+						<Button danger icon={<BorderOutlined />} onClick={handleStop}>
+							Stop
+						</Button>
+					) : (
+						<div className="flex gap-2">
+							{(currentRun.status === "DONE" ||
+								currentRun.status === "ERROR" ||
+								currentRun.status === "STOPPED") && (
+								<Popconfirm
+									title="Cancella i risultati e riporta il run a READY?"
+									okText="Reset"
+									okButtonProps={{ danger: true }}
+									cancelText="Annulla"
+									onConfirm={() =>
+										dispatch(
+											invalidateRunRequest({ backtestId, runId: runIdNum })
+										)
+									}
+								>
 									<Button
-										type="primary"
-										icon={<PlayCircleOutlined />}
-										onClick={handleExecute}
-									>
-										Execute
-									</Button>
-								</div>
-							)
-						}
-					>
-						<div className="flex gap-0">
-							{/* LEFT — meta + portafoglio neutro */}
-							<div className="w-1/2 pr-6 flex flex-col gap-4">
-								<div className="flex items-center justify-between">
-									<div className="flex items-center gap-2">
-										<FileTextOutlined className="text-gray-500" />
-										<span className="text-gray-500 text-xs uppercase tracking-wide">
-											Info
-										</span>
-									</div>
-									{!isRunning && (
-										<div className="flex gap-2">
-											{isEditingInfo ? (
-												<>
-													<Button
-														size="small"
-														icon={<CloseOutlined />}
-														onClick={cancelEditInfo}
-													>
-														Annulla
-													</Button>
-													<Button
-														size="small"
-														type="primary"
-														icon={<CheckOutlined />}
-														onClick={saveInfo}
-													>
-														Salva
-													</Button>
-												</>
-											) : (
-												<Button
-													size="small"
-													icon={<EditOutlined />}
-													onClick={startEditInfo}
-												>
-													Modifica
-												</Button>
-											)}
-										</div>
-									)}
-								</div>
-								<div className="flex flex-wrap gap-x-8 gap-y-3 text-sm">
-									<div className="w-full">
-										<span className="text-gray-500 block">Name</span>
-										{isEditingInfo && infoDraft ? (
-											<Input
-												size="small"
-												value={infoDraft.name}
-												onChange={(e) =>
-													setInfoDraft({ ...infoDraft, name: e.target.value })
-												}
-												placeholder="(optional)"
-											/>
-										) : (
-											<span className="font-medium">
-												{currentRun.name ?? (
-													<span className="text-gray-400">—</span>
-												)}
-											</span>
-										)}
-									</div>
-									<div>
-										<span className="text-gray-500 block">Frequency</span>
-										<span className="font-medium">{currentRun.frequency}</span>
-									</div>
-									<div>
-										<span className="text-gray-500 block">Status</span>
-										<Badge
-											status={STATUS_BADGE[currentRun.status].status}
-											text={STATUS_BADGE[currentRun.status].text}
-										/>
-									</div>
-									{isEditingInfo && infoDraft ? (
-										<div className="w-full">
-											<span className="text-gray-500 block">Period</span>
-											<DatePicker.RangePicker
-												picker="month"
-												size="small"
-												format="YYYY-MM"
-												value={
-													[dayjs(infoDraft.start), dayjs(infoDraft.end)] as [
-														Dayjs,
-														Dayjs
-													]
-												}
-												onChange={(_dates, strs) => {
-													if (strs[0] && strs[1]) {
-														setInfoDraft({
-															...infoDraft,
-															start: strs[0] + "-01",
-															end: strs[1] + "-01",
-														});
-													}
-												}}
-											/>
-										</div>
-									) : (
-										<>
-											<div>
-												<span className="text-gray-500 block">From</span>
-												<span className="font-medium">
-													{currentRun.start_date.slice(0, 7)}
-												</span>
-											</div>
-											<div>
-												<span className="text-gray-500 block">To</span>
-												<span className="font-medium">
-													{currentRun.end_date.slice(0, 7)}
-												</span>
-											</div>
-										</>
-									)}
-									{currentBacktest?.instrument && (
-										<div className="w-full">
-											<span className="text-gray-500 block">Instrument</span>
-											<span className="font-medium">
-												{capitalize(currentBacktest.instrument)}
-											</span>
-										</div>
-									)}
-									{currentRun.notes && (
-										<div>
-											<span className="text-gray-500 block">Notes</span>
-											<span className="font-medium">{currentRun.notes}</span>
-										</div>
-									)}
-									{currentRun.status === "ERROR" &&
-										currentRun.error_message && (
-											<div className="w-full">
-												<span className="text-gray-500 block">Error</span>
-												<span className="text-red-500 text-xs font-mono">
-													{currentRun.error_message}
-												</span>
-											</div>
-										)}
-								</div>
-							</div>
-
-							{/* DIVIDER */}
-							<div className="w-px bg-gray-100 shrink-0 mx-0" />
-
-							{/* RIGHT — Parameter Editor (always visible with tabs) */}
-							<div className="w-1/2">
-								{currentRun && (
-									<ParameterEditor
-										currentRun={currentRun}
-										backtestConfig={backtestConfig}
-										onSave={handleSaveParams}
-										onCancel={handleCancelParams}
-										onEdit={() => setIsEditingParams(true)}
+										icon={<ReloadOutlined />}
 										loading={invalidatingRunId === runIdNum}
-										readOnly={!isEditingParams || isRunning}
+									>
+										Reset
+									</Button>
+								</Popconfirm>
+							)}
+							<Button
+								type="primary"
+								icon={<PlayCircleOutlined />}
+								onClick={handleExecute}
+							>
+								Execute
+							</Button>
+						</div>
+					)
+				}
+			>
+				<div className="flex gap-0">
+					{/* LEFT — meta + portafoglio neutro */}
+					<div className="w-1/2 pr-6 flex flex-col gap-4">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-2">
+								<FileTextOutlined className="text-gray-500" />
+								<span className="text-gray-500 text-xs uppercase tracking-wide">
+									Info
+								</span>
+							</div>
+							{!isRunning && (
+								<div className="flex gap-2">
+									{isEditingInfo ? (
+										<>
+											<Button
+												size="small"
+												icon={<CloseOutlined />}
+												onClick={cancelEditInfo}
+											>
+												Annulla
+											</Button>
+											<Button
+												size="small"
+												type="primary"
+												icon={<CheckOutlined />}
+												onClick={saveInfo}
+											>
+												Salva
+											</Button>
+										</>
+									) : (
+										<Button
+											size="small"
+											icon={<EditOutlined />}
+											onClick={startEditInfo}
+										>
+											Modifica
+										</Button>
+									)}
+								</div>
+							)}
+						</div>
+						<div className="flex flex-wrap gap-x-8 gap-y-3 text-sm">
+							<div className="w-full">
+								<span className="text-gray-500 block">Name</span>
+								{isEditingInfo && infoDraft ? (
+									<Input
+										size="small"
+										value={infoDraft.name}
+										onChange={(e) =>
+											setInfoDraft({ ...infoDraft, name: e.target.value })
+										}
+										placeholder="(optional)"
 									/>
+								) : (
+									<span className="font-medium">
+										{currentRun.name ?? (
+											<span className="text-gray-400">—</span>
+										)}
+									</span>
 								)}
 							</div>
+							<div>
+								<span className="text-gray-500 block">Frequency</span>
+								<span className="font-medium">{currentRun.frequency}</span>
+							</div>
+							<div>
+								<span className="text-gray-500 block">Status</span>
+								<Badge
+									status={STATUS_BADGE[currentRun.status].status}
+									text={STATUS_BADGE[currentRun.status].text}
+								/>
+							</div>
+							{isEditingInfo && infoDraft ? (
+								<div className="w-full">
+									<span className="text-gray-500 block">Period</span>
+									<DatePicker.RangePicker
+										picker="month"
+										size="small"
+										format="YYYY-MM"
+										value={
+											[dayjs(infoDraft.start), dayjs(infoDraft.end)] as [
+												Dayjs,
+												Dayjs
+											]
+										}
+										onChange={(_dates, strs) => {
+											if (strs[0] && strs[1]) {
+												setInfoDraft({
+													...infoDraft,
+													start: strs[0] + "-01",
+													end: strs[1] + "-01",
+												});
+											}
+										}}
+									/>
+								</div>
+							) : (
+								<>
+									<div>
+										<span className="text-gray-500 block">From</span>
+										<span className="font-medium">
+											{currentRun.start_date.slice(0, 7)}
+										</span>
+									</div>
+									<div>
+										<span className="text-gray-500 block">To</span>
+										<span className="font-medium">
+											{currentRun.end_date.slice(0, 7)}
+										</span>
+									</div>
+								</>
+							)}
+							{currentBacktest?.instrument && (
+								<div className="w-full">
+									<span className="text-gray-500 block">Instrument</span>
+									<span className="font-medium">
+										{capitalize(currentBacktest.instrument)}
+									</span>
+								</div>
+							)}
+							{currentRun.notes && (
+								<div>
+									<span className="text-gray-500 block">Notes</span>
+									<span className="font-medium">{currentRun.notes}</span>
+								</div>
+							)}
+							{currentRun.status === "ERROR" && currentRun.error_message && (
+								<div className="w-full">
+									<span className="text-gray-500 block">Error</span>
+									<span className="text-red-500 text-xs font-mono">
+										{currentRun.error_message}
+									</span>
+								</div>
+							)}
 						</div>
-					</Card>
+					</div>
 
-					{/* Regime adjustments */}
-					{currentBacktest?.frequency === "EOM" &&
-						backtestConfig?.adjustments && (
-							<RegimeAdjustmentsCard
-								adjustments={backtestConfig.adjustments}
-								neutral={backtestConfig.neutral}
+					{/* DIVIDER */}
+					<div className="w-px bg-gray-100 shrink-0 mx-0" />
+
+					{/* RIGHT — Parameter Editor (always visible with tabs) */}
+					<div className="w-1/2">
+						{currentRun && (
+							<ParameterEditor
+								currentRun={currentRun}
+								backtestConfig={backtestConfig}
+								onSave={handleSaveParams}
+								onCancel={handleCancelParams}
+								onEdit={() => setIsEditingParams(true)}
+								loading={invalidatingRunId === runIdNum}
+								readOnly={!isEditingParams || isRunning}
 							/>
 						)}
+					</div>
+				</div>
+			</Card>
 
-					{/* NAV Summary */}
-					{navData.length > 0 && (
-						<Card size="small" style={{ marginBottom: 16 }}>
-							<div className="flex justify-between items-center gap-8">
-								<div>
-									<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
-										NAV
-									</div>
-									<div className="text-2xl font-bold">
-										${navData[navData.length - 1]?.nav.toFixed(2)}
-									</div>
-								</div>
-								<div>
-									<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
-										Total Return
-									</div>
-									<div
-										className={`text-2xl font-bold ${
-											navData.length >= 2
-												? (navData[navData.length - 1].nav / navData[0].nav) - 1 >= 0
-													? "text-green-600"
-													: "text-red-600"
-												: "text-gray-400"
-										}`}
-									>
-										{navData.length >= 2
-											? (
-												((navData[navData.length - 1].nav / navData[0].nav) - 1) * 100
-											).toFixed(2)
-											: "—"}
-										%
-									</div>
-								</div>
-							</div>
-						</Card>
-					)}
-
-					{/* Metrics */}
-					{currentRun && <Metrics currentRun={currentRun} />}
-
-					{/* NAV chart */}
-					{navData.length > 0 && (
-						<Card size="small" title="NAV">
-							<Chart
-								height={220}
-								showLegend={false}
-								yTickFormat={(v) => v.toFixed(2)}
-								series={[
-									{
-										key: "nav",
-										label: "NAV",
-										color: "#3b82f6",
-										type: "line",
-										data: navData.map((d) => ({
-											date: new Date(d.date),
-											value: d.nav,
-										})),
-									},
-								]}
-							/>
-						</Card>
-					)}
-
-					{/* Allocation weights table */}
-					{currentBacktest?.frequency === "EOM" && <AllocationTable />}
-
-					{/* Portfolio performances table */}
-					{currentBacktest?.frequency === "EOD" && (
-						<PortfolioPerformanceTable />
-					)}
-				</>
+			{/* Regime adjustments */}
+			{currentBacktest?.frequency === "EOM" && backtestConfig?.adjustments && (
+				<RegimeAdjustmentsCard
+					adjustments={backtestConfig.adjustments}
+					neutral={backtestConfig.neutral}
+				/>
 			)}
+
+			{/* NAV Summary */}
+			{navData.length > 0 && (
+				<Card size="small" style={{ marginBottom: 16 }}>
+					<div className="flex justify-between items-center gap-8">
+						<div>
+							<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
+								NAV
+							</div>
+							<div className="text-2xl font-bold">
+								${navData[navData.length - 1]?.nav.toFixed(2)}
+							</div>
+						</div>
+						<div>
+							<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
+								Total Return
+							</div>
+							<div
+								className={`text-2xl font-bold ${
+									navData.length >= 2
+										? navData[navData.length - 1].nav / navData[0].nav - 1 >= 0
+											? "text-green-600"
+											: "text-red-600"
+										: "text-gray-400"
+								}`}
+							>
+								{navData.length >= 2
+									? (
+											(navData[navData.length - 1].nav / navData[0].nav - 1) *
+											100
+									  ).toFixed(2)
+									: "—"}
+								%
+							</div>
+						</div>
+					</div>
+				</Card>
+			)}
+
+			{/* Metrics */}
+			{currentRun && <Metrics currentRun={currentRun} />}
+
+			{/* NAV chart */}
+			{navData.length > 0 && (
+				<Card size="small" title="NAV">
+					<Chart
+						height={220}
+						showLegend={false}
+						yTickFormat={(v) => v.toFixed(2)}
+						series={[
+							{
+								key: "nav",
+								label: "NAV",
+								color: "#3b82f6",
+								type: "line",
+								data: navData.map((d) => ({
+									date: new Date(d.date),
+									value: d.nav,
+								})),
+							},
+						]}
+					/>
+				</Card>
+			)}
+
+			{/* Allocation weights table */}
+			{currentBacktest?.frequency === "EOM" && <AllocationTable />}
+
+			{/* Portfolio performances table */}
+			{currentBacktest?.frequency === "EOD" && <PortfolioPerformanceTable />}
 		</div>
 	);
 }

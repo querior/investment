@@ -42,7 +42,7 @@ export default function BacktestDetail() {
 	const dispatch = useDispatch();
 	const navigate = useNavigate();
 
-	const { current, currentLoading, runs, runsLoading } = useSelector(
+	const { current, loading, positionLoading, runs } = useSelector(
 		(state: RootState) => state.backtest
 	);
 
@@ -237,7 +237,7 @@ export default function BacktestDetail() {
 				Back
 			</Button>
 
-			{currentLoading || !current ? (
+			{loading || !current ? (
 				<Skeleton active />
 			) : (
 				<Card
@@ -290,7 +290,7 @@ export default function BacktestDetail() {
 						size="small"
 						columns={columns}
 						dataSource={runs}
-						loading={runsLoading}
+						loading={positionLoading}
 						pagination={false}
 						scroll={{ x: "max-content" }}
 						onRow={(run) => ({

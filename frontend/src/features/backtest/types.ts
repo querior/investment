@@ -162,6 +162,12 @@ export type PositionsState = {
 	total: number;
 };
 
+export type NavDataPoint = {
+	date: string;
+	nav: number;
+	period_return: number;
+};
+
 export type BacktestState = {
 	// list
 	backtests: BacktestDto[];
@@ -182,6 +188,8 @@ export type BacktestState = {
 	portfolioPerformances: PortfolioPerformanceState;
 	positionLoading: boolean;
 	positions: PositionsState;
+	// nav data for chart
+	navData: NavDataPoint[];
 	// backtest config
 	backtestConfig: BacktestConfigDto | null;
 };

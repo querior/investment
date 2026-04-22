@@ -420,7 +420,8 @@ def execute_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Run already in progress")
     if run.end_date > date_type.today():  # type: ignore[operator]
         raise HTTPException(status_code=400, detail="end_date cannot be in the future")
-    # clear error
+    # Set status to RUNNING in database before starting background thread
+    run.status = BacktestStatus.RUNNING
     run.error_message = ""
     db.commit()
     Thread(target=run_in_background, args=(cast(int, run.id),), daemon=True).start()
@@ -490,6 +491,17 @@ def invalidate_run(backtest_id: int, run_id: int, db: Session = Depends(get_db))
     setattr(run, "status", BacktestStatus.READY)
     db.commit()
     return {"id": run_id, "status": BacktestStatus.READY}
+
+
+@router.get("/backtests/{backtest_id}/runs/{run_id}/status")
+def run_status(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
+    run = _get_run_or_404(backtest_id, run_id, db)
+    return {
+        "id": run_id,
+        "status": run.status,
+        "error_message": run.error_message,
+        "updated_at": run.updated_at,
+    }
 
 
 @router.get("/backtests/{backtest_id}/runs/{run_id}/metrics")

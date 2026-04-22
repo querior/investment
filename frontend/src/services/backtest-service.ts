@@ -85,8 +85,9 @@ export const deleteRunApi = async (
 export const executeRunApi = async (
 	backtestId: number,
 	runId: number
-): Promise<void> => {
-	await api.post(`/backtests/${backtestId}/runs/${runId}/execute`);
+): Promise<{ id: number; status: string }> => {
+	const res = await api.post(`/backtests/${backtestId}/runs/${runId}/execute`);
+	return res.data;
 };
 
 export const stopRunApi = async (
@@ -101,6 +102,14 @@ export const getRunApi = async (
 	runId: number
 ): Promise<BacktestRunDto> => {
 	const res = await api.get(`/backtests/${backtestId}/runs/${runId}`);
+	return res.data;
+};
+
+export const getRunStatusApi = async (
+	backtestId: number,
+	runId: number
+): Promise<{ id: number; status: string; error_message: string | null; updated_at: string }> => {
+	const res = await api.get(`/backtests/${backtestId}/runs/${runId}/status`);
 	return res.data;
 };
 

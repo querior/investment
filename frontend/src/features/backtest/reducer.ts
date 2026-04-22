@@ -37,6 +37,7 @@ const initialState: BacktestState = {
 		page_size: 20,
 		total: 0,
 	},
+	navData: [],
 	backtestConfig: null,
 };
 
@@ -195,6 +196,28 @@ const slice = createSlice({
 			state.positionLoading = false;
 			state.currentRun = action.payload;
 		},
+		fetchRunStatusRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
+			// No loading state needed for status polling
+		},
+		fetchRunStatusSuccess(
+			state,
+			action: PayloadAction<{
+				id: number;
+				status: string;
+				error_message: string | null;
+				updated_at: string;
+			}>
+		) {
+			// Update only status fields in currentRun to avoid flickering
+			if (state.currentRun) {
+				state.currentRun.status = action.payload.status as any;
+				state.currentRun.error_message = action.payload.error_message;
+				state.currentRun.updated_at = action.payload.updated_at;
+			}
+		},
 		// --- run weights ---
 		fetchRunWeightsRequest(
 			state,
@@ -236,6 +259,19 @@ const slice = createSlice({
 				total: action.payload.total,
 			};
 		},
+		// --- nav data ---
+		fetchRunNavRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
+			// No loading state needed for nav polling
+		},
+		fetchRunNavSuccess(
+			state,
+			action: PayloadAction<{ date: string; nav: number; period_return: number }[]>
+		) {
+			state.navData = action.payload;
+		},
 		// --- backtest config ---
 		fetchBacktestConfigRequest(state, _action: PayloadAction<number>) {
 			state.loading = true;
@@ -258,8 +294,20 @@ const slice = createSlice({
 			if (state.currentRun?.id === action.payload.runId)
 				state.currentRun.status = "RUNNING";
 		},
-		executeRunSuccess(state, action: PayloadAction<number>) {
+		executeRunSuccess(
+			state,
+			action: PayloadAction<{ runId: number; status: string }>
+		) {
 			state.executingRunId = null;
+			// Update currentRun with status from API response
+			if (state.currentRun?.id === action.payload.runId) {
+				state.currentRun.status = action.payload.status as any;
+			}
+			// Update run in list
+			const run = state.runs.find((r) => r.id === action.payload.runId);
+			if (run) {
+				run.status = action.payload.status as any;
+			}
 		},
 		// --- stop run ---
 		stopRunRequest(
@@ -331,8 +379,12 @@ export const {
 	invalidateRunSuccess,
 	fetchRunDetailRequest,
 	fetchRunDetailSuccess,
+	fetchRunStatusRequest,
+	fetchRunStatusSuccess,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
+	fetchRunNavRequest,
+	fetchRunNavSuccess,
 	fetchPortfolioPerformanceRequest,
 	fetchPortfolioPerformanceSuccess,
 	fetchBacktestConfigRequest,

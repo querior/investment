@@ -111,7 +111,7 @@ function buildAllocationColumns(rows: PivotRow[]): ColumnsType<PivotRow> {
 }
 
 const AllocationTable = () => {
-	const { runWeights, runWeightsLoading } = useSelector(
+	const { runWeights, loading } = useSelector(
 		(state: RootState) => state.backtest
 	);
 
@@ -129,7 +129,7 @@ const AllocationTable = () => {
 						size="small"
 						columns={buildAllocationColumns(rows)}
 						dataSource={rows}
-						loading={runWeightsLoading}
+						loading={loading}
 						pagination={{
 							pageSize: 20,
 							showTotal: (t) => `${t} records`,
