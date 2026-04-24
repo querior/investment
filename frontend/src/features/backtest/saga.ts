@@ -15,10 +15,9 @@ import {
 	getRunWeightsApi,
 	updateRunApi,
 	getBacktestConfigApi,
-	getRunNavApi,
 	invalidateRunApi,
 	cloneRunApi,
-	getPortfolioPerformancesApi,
+	getPerformanceApi,
 } from "../../services/backtest-service";
 import {
 	fetchBacktestsRequest,
@@ -51,8 +50,6 @@ import {
 	fetchRunStatusSuccess,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
-	fetchRunNavRequest,
-	fetchRunNavSuccess,
 	fetchPortfolioPerformanceRequest,
 	fetchPortfolioPerformanceSuccess,
 	fetchBacktestConfigRequest,
@@ -293,19 +290,6 @@ function* fetchBacktestConfigEffect(
 	}
 }
 
-function* fetchRunNavEffect(
-	action: ReturnType<typeof fetchRunNavRequest>
-): any {
-	const { backtestId, runId } = action.payload;
-	try {
-		const navData = yield call(getRunNavApi, backtestId, runId);
-		yield put(fetchRunNavSuccess(navData));
-	} catch (e: any) {
-		// Silently fail for nav polling — don't show error
-		// Nav is auxiliary data and polling failures shouldn't interrupt UX
-	}
-}
-
 function* fetchRunStatusEffect(
 	action: ReturnType<typeof fetchRunStatusRequest>
 ): any {
@@ -324,7 +308,7 @@ function* fetchPortfolioPerformancesEffect(
 	const { backtestId, runId, page = 1, limit = 20 } = action.payload;
 	try {
 		const data = yield call(
-			getPortfolioPerformancesApi,
+			getPerformanceApi,
 			backtestId,
 			runId,
 			page,
@@ -357,7 +341,6 @@ export function* backtestWatcher() {
 	yield takeLatest(fetchRunDetailRequest.type, fetchRunDetailEffect);
 	yield takeLatest(fetchRunStatusRequest.type, fetchRunStatusEffect);
 	yield takeLatest(fetchRunWeightsRequest.type, fetchRunWeightsEffect);
-	yield takeLatest(fetchRunNavRequest.type, fetchRunNavEffect);
 	yield takeLatest(
 		fetchPortfolioPerformanceRequest.type,
 		fetchPortfolioPerformancesEffect

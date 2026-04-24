@@ -101,8 +101,21 @@ export const getRunApi = async (
 	backtestId: number,
 	runId: number
 ): Promise<BacktestRunDto> => {
-	const res = await api.get(`/backtests/${backtestId}/runs/${runId}`);
-	return res.data;
+	// Fetch run metadata and metrics with nav
+	const [runRes, metricsRes] = await Promise.all([
+		api.get(`/backtests/${backtestId}/runs/${runId}`),
+		api.get(`/backtests/${backtestId}/runs/${runId}/metrics`),
+	]);
+
+	// Merge metrics data into run object
+	return {
+		...runRes.data,
+		summary: metricsRes.data.summary,
+		entry_rules: metricsRes.data.entry_rules,
+		exit_rules: metricsRes.data.exit_rules,
+		performances: metricsRes.data.performances,
+		nav: metricsRes.data.nav,
+	};
 };
 
 export const getRunStatusApi = async (
@@ -134,14 +147,6 @@ export const cloneRunApi = async (
 	return res.data;
 };
 
-export const getRunNavApi = async (
-	backtestId: number,
-	runId: number
-): Promise<{ date: string; nav: number; period_return: number }[]> => {
-	const res = await api.get(`/backtests/${backtestId}/runs/${runId}/nav`);
-	return res.data;
-};
-
 export const getRunWeightsApi = async (
 	backtestId: number,
 	runId: number
@@ -150,7 +155,7 @@ export const getRunWeightsApi = async (
 	return res.data;
 };
 
-export const getPortfolioPerformancesApi = async (
+export const getPerformanceApi = async (
 	backtestId: number,
 	runId: number,
 	page = 1,
@@ -160,9 +165,12 @@ export const getPortfolioPerformancesApi = async (
 	total: number;
 	page: number;
 	limit: number;
+	summary?: any;
+	performances?: any[];
+	nav?: any[];
 }> => {
 	const res = await api.get(
-		`/backtests/${backtestId}/runs/${runId}/positions`,
+		`/backtests/${backtestId}/runs/${runId}/performance`,
 		{ params: { page, limit } }
 	);
 	return res.data;

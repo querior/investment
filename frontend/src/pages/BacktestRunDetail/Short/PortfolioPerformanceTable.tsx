@@ -103,7 +103,7 @@ function buildPositionsColumns(): ColumnsType<BacktestPositionDto> {
 	];
 }
 
-const PortfolioPerformanceTable = () => {
+const PositionsTable = () => {
 	const dispatch = useDispatch();
 	const { positions, currentRun, positionLoading, current } = useSelector(
 		(state: RootState) => state.backtest
@@ -162,4 +162,4 @@ const PortfolioPerformanceTable = () => {
 	);
 };
 
-export default PortfolioPerformanceTable;
+export default PositionsTable;

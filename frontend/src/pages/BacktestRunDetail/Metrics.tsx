@@ -9,44 +9,47 @@ interface MetricsProps {
 }
 
 const Metrics = ({ currentRun }: MetricsProps) => {
+	// Use summary object if available, otherwise fallback to top-level fields
+	const summary = currentRun.summary || currentRun;
+
 	return (
 		<div className="grid grid-cols-4 gap-4">
 			<Card size="small">
 				<Statistic
 					title="CAGR"
-					value={fmt(currentRun.cagr, true)}
+					value={fmt(summary.cagr, true)}
 					valueStyle={{
-						color: (currentRun.cagr ?? 0) >= 0 ? "#3f8600" : "#cf1322",
+						color: (summary.cagr ?? 0) >= 0 ? "#3f8600" : "#cf1322",
 					}}
 				/>
 			</Card>
 			<Card size="small">
-				<Statistic title="Sharpe Ratio" value={fmt(currentRun.sharpe)} />
+				<Statistic title="Sharpe Ratio" value={fmt(summary.sharpe)} />
 			</Card>
 			<Card size="small">
 				<Statistic
 					title="Volatility"
-					value={fmt(currentRun.volatility, true)}
+					value={fmt(summary.volatility, true)}
 				/>
 			</Card>
 			<Card size="small">
 				<Statistic
 					title="Max Drawdown"
-					value={fmt(currentRun.max_drawdown, true)}
+					value={fmt(summary.max_drawdown, true)}
 					valueStyle={{ color: "#cf1322" }}
 				/>
 			</Card>
 			<Card size="small">
-				<Statistic title="Win Rate" value={fmt(currentRun.win_rate, true)} />
+				<Statistic title="Win Rate" value={fmt(summary.win_rate, true)} />
 			</Card>
 			<Card size="small">
 				<Statistic
 					title="Profit Factor"
-					value={fmt(currentRun.profit_factor)}
+					value={fmt(summary.profit_factor)}
 				/>
 			</Card>
 			<Card size="small">
-				<Statistic title="N. trade" value={currentRun.n_trades ?? "—"} />
+				<Statistic title="N. trade" value={summary.n_trades ?? "—"} />
 			</Card>
 		</div>
 	);

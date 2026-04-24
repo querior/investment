@@ -7,8 +7,11 @@ import type {
 	BacktestState,
 	CreateBacktestPayload,
 	CreateRunPayload,
+	MetricsSummary,
+	NavDataPoint,
 	RunParameter,
 	RunWeightDto,
+	StrategyPerformance,
 } from "./types";
 
 const initialState: BacktestState = {
@@ -249,6 +252,9 @@ const slice = createSlice({
 				total: number;
 				page: number;
 				limit: number;
+				summary?: MetricsSummary;
+				performances?: StrategyPerformance[];
+				nav?: NavDataPoint[];
 			}>
 		) {
 			state.loading = false;
@@ -258,19 +264,12 @@ const slice = createSlice({
 				page_size: action.payload.limit,
 				total: action.payload.total,
 			};
-		},
-		// --- nav data ---
-		fetchRunNavRequest(
-			state,
-			_action: PayloadAction<{ backtestId: number; runId: number }>
-		) {
-			// No loading state needed for nav polling
-		},
-		fetchRunNavSuccess(
-			state,
-			action: PayloadAction<{ date: string; nav: number; period_return: number }[]>
-		) {
-			state.navData = action.payload;
+			// Update metrics in currentRun from polling response
+			if (state.currentRun && action.payload.summary) {
+				state.currentRun.summary = action.payload.summary;
+				state.currentRun.performances = action.payload.performances;
+				state.currentRun.nav = action.payload.nav || [];
+			}
 		},
 		// --- backtest config ---
 		fetchBacktestConfigRequest(state, _action: PayloadAction<number>) {
@@ -291,8 +290,9 @@ const slice = createSlice({
 			state.executingRunId = action.payload.runId;
 			const run = state.runs.find((r) => r.id === action.payload.runId);
 			if (run) run.status = "RUNNING";
-			if (state.currentRun?.id === action.payload.runId)
+			if (state.currentRun?.id === action.payload.runId) {
 				state.currentRun.status = "RUNNING";
+			}
 		},
 		executeRunSuccess(
 			state,
@@ -302,12 +302,23 @@ const slice = createSlice({
 			// Update currentRun with status from API response
 			if (state.currentRun?.id === action.payload.runId) {
 				state.currentRun.status = action.payload.status as any;
+				// Reset metrics and data for new execution (read from summary)
+				state.currentRun.summary = undefined;
+				state.currentRun.nav = [];
+				state.currentRun.performances = [];
 			}
 			// Update run in list
 			const run = state.runs.find((r) => r.id === action.payload.runId);
 			if (run) {
 				run.status = action.payload.status as any;
 			}
+			// Reset positions state
+			state.positions = {
+				items: [],
+				page: 1,
+				page_size: 20,
+				total: 0,
+			};
 		},
 		// --- stop run ---
 		stopRunRequest(
@@ -328,13 +339,7 @@ const slice = createSlice({
 			state.invalidatingRunId = null;
 			const reset = (run: BacktestRunDto) => {
 				run.status = "READY";
-				run.cagr = null;
-				run.sharpe = null;
-				run.volatility = null;
-				run.max_drawdown = null;
-				run.win_rate = null;
-				run.profit_factor = null;
-				run.n_trades = null;
+				run.summary = undefined;
 			};
 			const run = state.runs.find((r) => r.id === action.payload);
 			if (run) reset(run);
@@ -383,8 +388,6 @@ export const {
 	fetchRunStatusSuccess,
 	fetchRunWeightsRequest,
 	fetchRunWeightsSuccess,
-	fetchRunNavRequest,
-	fetchRunNavSuccess,
 	fetchPortfolioPerformanceRequest,
 	fetchPortfolioPerformanceSuccess,
 	fetchBacktestConfigRequest,

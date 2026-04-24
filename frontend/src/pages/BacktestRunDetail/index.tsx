@@ -33,7 +33,6 @@ import {
 	updateRunRequest,
 	invalidateRunRequest,
 	fetchPortfolioPerformanceRequest,
-	fetchRunNavRequest,
 } from "../../features/backtest/reducer";
 import type { RootState } from "../../store/reducers";
 import Chart from "../../components/charts/Chart";
@@ -42,8 +41,9 @@ import { BacktestStatus, FrequencyType } from "../../features/backtest/types";
 import { capitalize } from "../../utils/string";
 import RegimeAdjustmentsCard from "./Long/RegimeAdjustmentCard";
 import Metrics from "./Metrics";
+import PerformanceTable from "./PerformanceTable";
 import AllocationTable from "./Long/AllocationTable";
-import PortfolioPerformanceTable from "./Short/PortfolioPerformanceTable";
+import PositionsTable from "./Short/PortfolioPerformanceTable";
 import ParameterEditor from "../../components/backtest/ParameterEditor";
 
 const STATUS_BADGE: Record<
@@ -72,8 +72,10 @@ export default function BacktestRunDetail() {
 		currentRun,
 		invalidatingRunId,
 		backtestConfig,
-		navData,
 	} = useSelector((state: RootState) => state.backtest);
+
+	// NAV data from currentRun instead of separate navData state
+	const navData = currentRun?.nav || [];
 
 	const isRunning = currentRun?.status === "RUNNING";
 
@@ -95,12 +97,6 @@ export default function BacktestRunDetail() {
 				runId: runIdNum,
 			})
 		);
-		dispatch(
-			fetchRunNavRequest({
-				backtestId,
-				runId: runIdNum,
-			})
-		);
 	};
 
 	const pollData = () => {
@@ -112,12 +108,6 @@ export default function BacktestRunDetail() {
 		);
 		dispatch(
 			fetchPortfolioPerformanceRequest({
-				backtestId,
-				runId: runIdNum,
-			})
-		);
-		dispatch(
-			fetchRunNavRequest({
 				backtestId,
 				runId: runIdNum,
 			})
@@ -188,12 +178,6 @@ export default function BacktestRunDetail() {
 
 	useEffect(() => {
 		dispatch(fetchBacktestRequest(backtestId));
-		if (currentBacktest?.frequency === "EOD") {
-			// Carica il run solo se non è in esecuzione (il polling lo aggiorna continuamente se in RUNNING)
-			if (!isRunning) {
-				refreshData();
-			}
-		}
 
 		if (currentBacktest?.frequency === FrequencyType.EOM) {
 			dispatch(fetchRunWeightsRequest({ backtestId, runId: runIdNum }));
@@ -420,6 +404,9 @@ export default function BacktestRunDetail() {
 								</div>
 							)}
 						</div>
+						{currentRun && (
+							<PerformanceTable performances={currentRun.performances} />
+						)}
 					</div>
 
 					{/* DIVIDER */}
@@ -451,74 +438,72 @@ export default function BacktestRunDetail() {
 			)}
 
 			{/* NAV Summary */}
-			{navData.length > 0 && (
-				<Card size="small" style={{ marginBottom: 16 }}>
-					<div className="flex justify-between items-center gap-8">
-						<div>
-							<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
-								NAV
-							</div>
-							<div className="text-2xl font-bold">
-								${navData[navData.length - 1]?.nav.toFixed(2)}
-							</div>
+
+			<Card size="small" style={{ marginBottom: 16 }}>
+				<div className="flex justify-between items-center gap-8">
+					<div>
+						<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
+							NAV
 						</div>
-						<div>
-							<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
-								Total Return
-							</div>
-							<div
-								className={`text-2xl font-bold ${
-									navData.length >= 2
-										? navData[navData.length - 1].nav / navData[0].nav - 1 >= 0
-											? "text-green-600"
-											: "text-red-600"
-										: "text-gray-400"
-								}`}
-							>
-								{navData.length >= 2
-									? (
-											(navData[navData.length - 1].nav / navData[0].nav - 1) *
-											100
-									  ).toFixed(2)
-									: "—"}
-								%
-							</div>
+						<div className="text-2xl font-bold">
+							{navData.length > 0 ? "$" : ""}
+							{navData[navData.length - 1]?.nav.toFixed(2)}
 						</div>
 					</div>
-				</Card>
-			)}
+					<div>
+						<div className="text-gray-500 text-xs uppercase tracking-wide block mb-1">
+							Total Return
+						</div>
+						<div
+							className={`text-2xl font-bold ${
+								navData.length >= 2
+									? navData[navData.length - 1].nav / navData[0].nav - 1 >= 0
+										? "text-green-600"
+										: "text-red-600"
+									: "text-gray-400"
+							}`}
+						>
+							{navData.length >= 2
+								? (
+										(navData[navData.length - 1].nav / navData[0].nav - 1) *
+										100
+								  ).toFixed(2)
+								: "—"}
+							%
+						</div>
+					</div>
+				</div>
+			</Card>
 
 			{/* Metrics */}
 			{currentRun && <Metrics currentRun={currentRun} />}
 
 			{/* NAV chart */}
-			{navData.length > 0 && (
-				<Card size="small" title="NAV">
-					<Chart
-						height={220}
-						showLegend={false}
-						yTickFormat={(v) => v.toFixed(2)}
-						series={[
-							{
-								key: "nav",
-								label: "NAV",
-								color: "#3b82f6",
-								type: "line",
-								data: navData.map((d) => ({
-									date: new Date(d.date),
-									value: d.nav,
-								})),
-							},
-						]}
-					/>
-				</Card>
-			)}
+			<Card size="small" title="NAV">
+				<Chart
+					height={220}
+					showLegend={false}
+					yTickFormat={(v) => v.toFixed(2)}
+					series={[
+						{
+							key: "nav",
+							label: "NAV",
+							color: "#3b82f6",
+							type: "line",
+							data: navData.map((d) => ({
+								date: new Date(d.date),
+								value: d.nav,
+							})),
+						},
+					]}
+				/>
+			</Card>
 
 			{/* Allocation weights table */}
 			{currentBacktest?.frequency === "EOM" && <AllocationTable />}
 
 			{/* Portfolio performances table */}
-			{currentBacktest?.frequency === "EOD" && <PortfolioPerformanceTable />}
+			{currentBacktest?.frequency === "EOD" && <PositionsTable />}
 		</div>
 	);
 }

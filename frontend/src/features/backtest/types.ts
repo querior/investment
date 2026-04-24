@@ -25,6 +25,31 @@ export type RunParameter = {
 	unit: string;
 };
 
+export type MetricsSummary = {
+	cagr: number | null;
+	sharpe: number | null;
+	volatility: number | null;
+	max_drawdown: number | null;
+	win_rate: number | null;
+	profit_factor: number | null;
+	n_trades: number | null;
+};
+
+export type StrategyPerformance = {
+	strategy: string;
+	strategy_acronym: string | null;
+	strategy_name: string | null;
+	strategy_color: string;
+	count: number;
+	winning: number;
+	losing: number;
+	win_rate: number;
+	avg_holding_days: number;
+	total_pnl: number;
+	avg_pnl: number;
+	max_drawdown: number | null;
+};
+
 export type BacktestRunDto = {
 	id: number;
 	backtest_id: number;
@@ -36,16 +61,15 @@ export type BacktestRunDto = {
 	status: BacktestStatus;
 	notes: string | null;
 	error_message: string | null;
-	cagr: number | null;
-	sharpe: number | null;
-	volatility: number | null;
-	max_drawdown: number | null;
-	win_rate: number | null;
-	profit_factor: number | null;
-	n_trades: number | null;
 	created_at: string;
 	updated_at: string;
 	parameters: Record<string, RunParameter>;
+	// Fields from metrics endpoint
+	summary?: MetricsSummary;
+	entry_rules?: Record<string, string>;
+	exit_rules?: Record<string, string>;
+	performances?: StrategyPerformance[];
+	nav?: NavDataPoint[];
 };
 
 export type BacktestListResponse = {

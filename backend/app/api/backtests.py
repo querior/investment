@@ -92,13 +92,6 @@ def _serialize_run(run: BacktestRun, db: Session) -> dict:
         "status": run.status,
         "notes": run.notes,
         "error_message": run.error_message,
-        "cagr": run.cagr,
-        "sharpe": run.sharpe,
-        "volatility": run.volatility,
-        "max_drawdown": run.max_drawdown,
-        "win_rate": run.win_rate,
-        "profit_factor": run.profit_factor,
-        "n_trades": run.n_trades,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
         "parameters": params_dict,
@@ -411,18 +404,35 @@ def execute_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     run = _get_run_or_404(backtest_id, run_id, db)
     bt = _get_backtest_or_404(backtest_id, db)
     if bt.frequency != BacktestFrequency.EOM and bt.frequency != BacktestFrequency.EOD:
-        run.status = BacktestStatus.ERROR 
+        run.status = BacktestStatus.ERROR
         run.error_message = f"***Backtest execution not yet implemented for frequency {bt.frequency}"  # type: ignore[assignment]
         db.commit()
         return {"id": run_id, "status": BacktestStatus.ERROR}
 
-    if run.status == BacktestStatus.RUNNING:  
+    if run.status == BacktestStatus.RUNNING:
         raise HTTPException(status_code=409, detail="Run already in progress")
     if run.end_date > date_type.today():  # type: ignore[operator]
         raise HTTPException(status_code=400, detail="end_date cannot be in the future")
+
+    # Reset metrics, performance, and positions before execution
+    run.cagr = None
+    run.sharpe = None
+    run.volatility = None
+    run.max_drawdown = None
+    run.win_rate = None
+    run.profit_factor = None
+    run.n_trades = None
+    run.error_message = ""
+
+    # Delete previous results
+    db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
+    db.query(BacktestPortfolioPerformance).filter(BacktestPortfolioPerformance.run_id == run_id).delete()
+    db.query(BacktestPosition).filter(BacktestPosition.run_id == run_id).delete()
+    db.query(BacktestPositionSnapshot).filter(BacktestPositionSnapshot.run_id == run_id).delete()
+    db.query(BacktestWeight).filter(BacktestWeight.run_id == run_id).delete()
+
     # Set status to RUNNING in database before starting background thread
     run.status = BacktestStatus.RUNNING
-    run.error_message = ""
     db.commit()
     Thread(target=run_in_background, args=(cast(int, run.id),), daemon=True).start()
     return {"id": run_id, "status": BacktestStatus.RUNNING}
@@ -458,25 +468,6 @@ def run_weights(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/backtests/{backtest_id}/runs/{run_id}/nav")
-def run_nav(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
-    _get_run_or_404(backtest_id, run_id, db)
-    rows = (
-        db.query(BacktestPerformance)
-        .filter(BacktestPerformance.run_id == run_id)
-        .order_by(BacktestPerformance.date)
-        .all()
-    )
-    return [
-        {
-            "date": r.date,
-            "nav": cast(float, r.nav),
-            "period_return": cast(float, r.period_return),
-        }
-        for r in rows
-    ]
-
-
 @router.post("/backtests/{backtest_id}/runs/{run_id}/invalidate")
 def invalidate_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     run = _get_run_or_404(backtest_id, run_id, db)
@@ -507,12 +498,133 @@ def run_status(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
 @router.get("/backtests/{backtest_id}/runs/{run_id}/metrics")
 def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     run = _get_run_or_404(backtest_id, run_id, db)
-    return {
-        "run_id": run_id,
+
+    # Extract entry and exit rules from parameters
+    params = db.query(BacktestRunParameter).filter(BacktestRunParameter.run_id == run_id).all()
+
+    entry_rules = {}
+    exit_rules = {}
+
+    for p in params:
+        if p.key.startswith("entry."):
+            entry_rules[p.key] = p.value
+        elif p.key.startswith("exit."):
+            exit_rules[p.key] = p.value
+
+    # Summary of overall run metrics
+    summary = {
         "cagr": run.cagr,
         "volatility": run.volatility,
         "sharpe": run.sharpe,
         "max_drawdown": run.max_drawdown,
+        "win_rate": run.win_rate,
+        "profit_factor": run.profit_factor,
+        "n_trades": run.n_trades,
+    }
+
+    # Performance breakdown by strategy
+    positions = (
+        db.query(BacktestPosition)
+        .filter(BacktestPosition.run_id == run_id)
+        .all()
+    )
+
+    strategies_data = {}
+    for pos in positions:
+        strategy = pos.position_type
+
+        if strategy not in strategies_data:
+            strategies_data[strategy] = {
+                "count": 0,
+                "winning": 0,
+                "losing": 0,
+                "total_pnl": 0.0,
+                "days_in_trade": [],
+                "snapshots_for_dd": [],
+                "strategy_acronym": pos.strategy.acronym if pos.strategy else None,
+                "strategy_name": pos.strategy.name if pos.strategy else strategy,
+                "strategy_color": pos.strategy.color if pos.strategy else "default",
+            }
+
+        strategies_data[strategy]["count"] += 1
+
+        if pos.realized_pnl and pos.realized_pnl > 0:
+            strategies_data[strategy]["winning"] += 1
+        elif pos.realized_pnl and pos.realized_pnl < 0:
+            strategies_data[strategy]["losing"] += 1
+
+        if pos.realized_pnl:
+            strategies_data[strategy]["total_pnl"] += pos.realized_pnl
+
+        if pos.closed_at:
+            days = (pos.closed_at - pos.opened_at).days
+            strategies_data[strategy]["days_in_trade"].append(days)
+
+        snapshots = (
+            db.query(BacktestPositionSnapshot)
+            .filter(BacktestPositionSnapshot.position_id == pos.id)
+            .order_by(BacktestPositionSnapshot.snapshot_date)
+            .all()
+        )
+        if snapshots:
+            strategies_data[strategy]["snapshots_for_dd"].extend(snapshots)
+
+    performances = []
+    for strategy, data in sorted(strategies_data.items()):
+        avg_days = (
+            sum(data["days_in_trade"]) / len(data["days_in_trade"])
+            if data["days_in_trade"]
+            else 0
+        )
+        avg_pnl = data["total_pnl"] / data["count"] if data["count"] > 0 else 0
+
+        max_dd = None
+        if data["snapshots_for_dd"]:
+            max_pnl = max((s.position_pnl for s in data["snapshots_for_dd"] if s.position_pnl is not None), default=None)
+            min_pnl = min((s.position_pnl for s in data["snapshots_for_dd"] if s.position_pnl is not None), default=None)
+            if max_pnl is not None and min_pnl is not None and max_pnl > 0:
+                max_dd = (max_pnl - min_pnl) / max_pnl if max_pnl != 0 else 0
+
+        performances.append({
+            "strategy": strategy,
+            "strategy_acronym": data.get("strategy_acronym"),
+            "strategy_name": data.get("strategy_name"),
+            "strategy_color": data.get("strategy_color"),
+            "count": data["count"],
+            "winning": data["winning"],
+            "losing": data["losing"],
+            "win_rate": data["winning"] / data["count"] if data["count"] > 0 else 0,
+            "avg_holding_days": round(avg_days, 2),
+            "total_pnl": round(data["total_pnl"], 2),
+            "avg_pnl": round(avg_pnl, 2),
+            "max_drawdown": round(max_dd, 4) if max_dd is not None else None,
+        })
+
+    # Fetch NAV data
+    nav_rows = (
+        db.query(BacktestPerformance)
+        .filter(BacktestPerformance.run_id == run_id)
+        .order_by(BacktestPerformance.date)
+        .all()
+    )
+    nav = [
+        {
+            "date": r.date,
+            "nav": cast(float, r.nav),
+            "period_return": cast(float, r.period_return),
+        }
+        for r in nav_rows
+    ]
+
+    return {
+        "run_id": run_id,
+        "start_date": run.start_date,
+        "end_date": run.end_date,
+        "summary": summary,
+        "entry_rules": entry_rules,
+        "exit_rules": exit_rules,
+        "performances": performances,
+        "nav": nav,
     }
 
 
@@ -523,8 +635,8 @@ def run_ev_accuracy(backtest_id: int, run_id: int, db: Session = Depends(get_db)
     return compute_ev_accuracy(db, run_id)
 
 
-@router.get("/backtests/{backtest_id}/runs/{run_id}/positions")
-def run_portfolio_performances(backtest_id: int, run_id: int, page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
+@router.get("/backtests/{backtest_id}/runs/{run_id}/performance")
+def run_performance(backtest_id: int, run_id: int, page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
     _get_run_or_404(backtest_id, run_id, db)
     total = (
         db.query(BacktestPosition)
@@ -594,11 +706,116 @@ def run_portfolio_performances(backtest_id: int, run_id: int, page: int = 1, lim
             "days_in_trade": days_in_trade,
         })
 
+    # Calculate summary metrics (same as /metrics)
+    run = _get_run_or_404(backtest_id, run_id, db)
+
+    summary = {
+        "cagr": run.cagr,
+        "volatility": run.volatility,
+        "sharpe": run.sharpe,
+        "max_drawdown": run.max_drawdown,
+        "win_rate": run.win_rate,
+        "profit_factor": run.profit_factor,
+        "n_trades": run.n_trades,
+    }
+
+    # Get all positions for performance calculation
+    all_positions = db.query(BacktestPosition).filter(BacktestPosition.run_id == run_id).all()
+
+    strategies_data = {}
+    for pos in all_positions:
+        strategy = pos.position_type
+        if strategy not in strategies_data:
+            strategies_data[strategy] = {
+                "count": 0,
+                "winning": 0,
+                "losing": 0,
+                "total_pnl": 0.0,
+                "days_in_trade": [],
+                "snapshots_for_dd": [],
+                "strategy_acronym": pos.strategy.acronym if pos.strategy else None,
+                "strategy_name": pos.strategy.name if pos.strategy else strategy,
+                "strategy_color": pos.strategy.color if pos.strategy else "default",
+            }
+
+        strategies_data[strategy]["count"] += 1
+
+        if pos.realized_pnl and pos.realized_pnl > 0:
+            strategies_data[strategy]["winning"] += 1
+        elif pos.realized_pnl and pos.realized_pnl < 0:
+            strategies_data[strategy]["losing"] += 1
+
+        if pos.realized_pnl:
+            strategies_data[strategy]["total_pnl"] += pos.realized_pnl
+
+        if pos.closed_at:
+            days = (pos.closed_at - pos.opened_at).days
+            strategies_data[strategy]["days_in_trade"].append(days)
+
+        snapshots = (
+            db.query(BacktestPositionSnapshot)
+            .filter(BacktestPositionSnapshot.position_id == pos.id)
+            .order_by(BacktestPositionSnapshot.snapshot_date)
+            .all()
+        )
+        if snapshots:
+            strategies_data[strategy]["snapshots_for_dd"].extend(snapshots)
+
+    performances = []
+    for strategy, data in sorted(strategies_data.items()):
+        avg_days = (
+            sum(data["days_in_trade"]) / len(data["days_in_trade"])
+            if data["days_in_trade"]
+            else 0
+        )
+        avg_pnl = data["total_pnl"] / data["count"] if data["count"] > 0 else 0
+
+        max_dd = None
+        if data["snapshots_for_dd"]:
+            max_pnl = max((s.position_pnl for s in data["snapshots_for_dd"] if s.position_pnl is not None), default=None)
+            min_pnl = min((s.position_pnl for s in data["snapshots_for_dd"] if s.position_pnl is not None), default=None)
+            if max_pnl is not None and min_pnl is not None and max_pnl > 0:
+                max_dd = (max_pnl - min_pnl) / max_pnl if max_pnl != 0 else 0
+
+        performances.append({
+            "strategy": strategy,
+            "strategy_acronym": data.get("strategy_acronym"),
+            "strategy_name": data.get("strategy_name"),
+            "strategy_color": data.get("strategy_color"),
+            "count": data["count"],
+            "winning": data["winning"],
+            "losing": data["losing"],
+            "win_rate": data["winning"] / data["count"] if data["count"] > 0 else 0,
+            "avg_holding_days": round(avg_days, 2),
+            "total_pnl": round(data["total_pnl"], 2),
+            "avg_pnl": round(avg_pnl, 2),
+            "max_drawdown": round(max_dd, 4) if max_dd is not None else None,
+        })
+
+    # Fetch NAV data
+    nav_rows = (
+        db.query(BacktestPerformance)
+        .filter(BacktestPerformance.run_id == run_id)
+        .order_by(BacktestPerformance.date)
+        .all()
+    )
+    nav = [
+        {
+            "date": r.date,
+            "nav": cast(float, r.nav),
+            "period_return": cast(float, r.period_return),
+        }
+        for r in nav_rows
+    ]
+
     return {
         "items": items,
         "total": total,
         "page": page,
         "limit": limit,
+        "summary": summary,
+        "performances": performances,
+        "nav": nav,
     }
 
 

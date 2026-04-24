@@ -570,18 +570,8 @@ def run_eod_backtest(
                         "rv_20": float(row.get("rv_20", 0)) if row.get("rv_20") is not None else None,
                     }
 
-                    # Capture exit conditions rules
-                    exit_conditions = {
-                        "rule_dte": {"enabled": True, "threshold_days": 21},
-                        "rule_profit_target": {"enabled": True, "threshold_pct": 50},
-                        "rule_stop_loss": {"enabled": False, "threshold_pct": 200},
-                        "rule_trailing_stop": {"enabled": False},
-                        "rule_macro_reversal": {"enabled": False},
-                        "rule_momentum_reversal": {"enabled": False},
-                        "rule_iv_spike": {"enabled": False, "threshold_ratio": 2.0},
-                        "rule_delta_breach": {"enabled": False, "threshold": 0.5},
-                        "rule_theta_decay": {"enabled": False, "threshold_ratio": 0.05},
-                    }
+                    # Capture exit conditions rules - use actual exit_config from run parameters
+                    exit_conditions = exit_config.copy() if exit_config else {}
 
                     db_position = BacktestPosition(
                         run_id=run.id,
