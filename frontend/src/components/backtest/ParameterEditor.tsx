@@ -259,6 +259,50 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 			description:
 				"Entry score threshold for reduced position sizing (0-100). Score >= this = 75% size, below = no entry.",
 		},
+		"entry_size.multiplier_full": {
+			label: "Size Multiplier (Full)",
+			description:
+				"Position size multiplier when score > threshold_full (0-1). 1.0 = 100% of nominal size.",
+		},
+		"entry_size.multiplier_reduced": {
+			label: "Size Multiplier (Reduced)",
+			description:
+				"Position size multiplier when score >= threshold_reduced (0-1). 0.75 = 75% of nominal size.",
+		},
+
+		// Entry Scoring - DTE
+		"entry_score.dte_min": {
+			label: "DTE Minimum (days)",
+			description:
+				"Minimum days to expiration threshold. Below this = unfavorable timing.",
+		},
+		"entry_score.dte_optimal_min": {
+			label: "DTE Optimal Min (days)",
+			description:
+				"Start of optimal DTE range (days). Ideal entry between optimal_min and optimal_max.",
+		},
+		"entry_score.dte_optimal_max": {
+			label: "DTE Optimal Max (days)",
+			description:
+				"End of optimal DTE range (days). Typical: 35-45 for weekly strategies.",
+		},
+		"entry_score.dte_max": {
+			label: "DTE Maximum (days)",
+			description:
+				"Maximum days to expiration threshold. Above this = less theta decay.",
+		},
+
+		// Entry Scoring - RSI Neutrality
+		"entry_score.rsi_neutral_min": {
+			label: "RSI Neutral Min",
+			description:
+				"Lower bound of RSI neutral zone (0-100). Typical: 40. Inside [40,60] = perfect momentum.",
+		},
+		"entry_score.rsi_neutral_max": {
+			label: "RSI Neutral Max",
+			description:
+				"Upper bound of RSI neutral zone (0-100). Typical: 60. Inside [40,60] = perfect momentum.",
+		},
 
 		// Pipeline - IV Rank
 		"iv_rank.lookback_days": {
@@ -339,9 +383,19 @@ const ENTRY_PARAMS = [
 	"entry_score.w4_rsi",
 	"entry_score.w5_dte",
 	"entry_score.w6_volume",
+	// Entry scoring - DTE optimal range
+	"entry_score.dte_min",
+	"entry_score.dte_optimal_min",
+	"entry_score.dte_optimal_max",
+	"entry_score.dte_max",
+	// Entry scoring - RSI neutrality
+	"entry_score.rsi_neutral_min",
+	"entry_score.rsi_neutral_max",
 	// Position sizing
 	"entry_size.threshold_full",
 	"entry_size.threshold_reduced",
+	"entry_size.multiplier_full",
+	"entry_size.multiplier_reduced",
 ];
 
 const STRATEGY_PARAMS = [

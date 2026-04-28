@@ -143,6 +143,78 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
         "unit": "value",
         "precision": 0,
     },
+    "entry_size.multiplier_full": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "1.0",
+        "unit": "value",
+        "precision": 2,
+    },
+    "entry_size.multiplier_reduced": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.75",
+        "unit": "value",
+        "precision": 2,
+    },
+
+    # =========================================================================
+    # ENTRY SCORING PARAMETERS — DTE Optimal Range
+    # =========================================================================
+    "entry_score.dte_min": {
+        "type": "int",
+        "min": 1,
+        "max": 100,
+        "default": "21",
+        "unit": "days",
+        "precision": 0,
+    },
+    "entry_score.dte_optimal_min": {
+        "type": "int",
+        "min": 1,
+        "max": 100,
+        "default": "35",
+        "unit": "days",
+        "precision": 0,
+    },
+    "entry_score.dte_optimal_max": {
+        "type": "int",
+        "min": 1,
+        "max": 100,
+        "default": "45",
+        "unit": "days",
+        "precision": 0,
+    },
+    "entry_score.dte_max": {
+        "type": "int",
+        "min": 1,
+        "max": 365,
+        "default": "55",
+        "unit": "days",
+        "precision": 0,
+    },
+
+    # =========================================================================
+    # ENTRY SCORING PARAMETERS — RSI Neutrality
+    # =========================================================================
+    "entry_score.rsi_neutral_min": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "40",
+        "unit": "value",
+        "precision": 0,
+    },
+    "entry_score.rsi_neutral_max": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "60",
+        "unit": "value",
+        "precision": 0,
+    },
 
     # =========================================================================
     # EXIT PARAMETERS — DTE Rule

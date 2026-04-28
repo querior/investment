@@ -80,16 +80,34 @@ def calculate_entry_score(row: pd.Series, entry_config: dict) -> float:
         component_3 = float(squeeze_intensity)  # already 0-100
 
     # --- Component 4: RSI Neutrality (RSI in middle range is best) ---
-    # Best: RSI 40-60 (neutral). Worst: RSI < 30 or > 70 (extreme)
+    # Best: RSI in neutral range (configurable, default 40-60)
+    # Worst: RSI in extreme zones
+    rsi_neutral_min = float(entry_config.get("entry_score.rsi_neutral_min", 40))
+    rsi_neutral_max = float(entry_config.get("entry_score.rsi_neutral_max", 60))
+
     rsi = row.get("rsi_14")
     if rsi is None or pd.isna(rsi):
         component_4 = 50
     else:
         rsi = float(rsi)
-        # Distance from neutrality: |RSI - 50|
-        # At 50: score 100, At 30/70: score ~30, At 0/100: score 0
-        distance = abs(rsi - 50)
-        component_4 = max(0, 100 - (distance / 50) * 100)  # 0-100
+        # Score logic:
+        # - Inside neutral range [40,60]: score peaks at 100
+        # - Outside but within [20,80]: score decays linearly to ~30
+        # - Extreme [0,20] or [80,100]: score near 0
+        if rsi_neutral_min <= rsi <= rsi_neutral_max:
+            # Inside neutral range: score 100
+            component_4 = 100
+        elif (rsi >= 20 and rsi < rsi_neutral_min) or (rsi > rsi_neutral_max and rsi <= 80):
+            # Semi-extreme: linear decay
+            if rsi < rsi_neutral_min:
+                distance = rsi_neutral_min - rsi
+                component_4 = 100 - (distance / (rsi_neutral_min - 20)) * 70  # decay to ~30
+            else:
+                distance = rsi - rsi_neutral_max
+                component_4 = 100 - (distance / (80 - rsi_neutral_max)) * 70  # decay to ~30
+        else:
+            # Extreme: score near 0
+            component_4 = 10
 
     # --- Component 5: DTE Score (Days to Expiration optimal range) ---
     # Optimal: 35-45 DTE. Outside 21-55: suboptimal

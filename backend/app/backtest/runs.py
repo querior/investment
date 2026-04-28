@@ -134,6 +134,10 @@ def _build_entry_config(params_dict: dict) -> dict:
         "entry_score.dte_optimal_max": int(_get("entry_score.dte_optimal_max", "45")),
         "entry_score.dte_max": int(_get("entry_score.dte_max", "55")),
 
+        # RSI Neutrality parameters
+        "entry_score.rsi_neutral_min": float(_get("entry_score.rsi_neutral_min", "40")),
+        "entry_score.rsi_neutral_max": float(_get("entry_score.rsi_neutral_max", "60")),
+
         # Sizing thresholds
         "entry_size.threshold_full": float(_get("entry_size.threshold_full", "75")),
         "entry_size.threshold_reduced": float(_get("entry_size.threshold_reduced", "60")),
@@ -730,7 +734,9 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
 
     logger.warning(f"[RUN {run.id}] Starting EOD backtest execution with {len(df)} data points")
     run_eod_backtest(
-        db, run, df,
+        db, 
+        run, 
+        df,
         initial_cash=initial_capital,
         entry_every_n_days=entry_every_n_days,
         instrument=instrument,

@@ -5,13 +5,19 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 import pandas as pd
+import os
 from app.db.session import Base, engine as app_engine
 from app.core.settings import Settings
 from app.db.macro_raw import MacroRaw
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from fastapi.testclient import TestClient
-from app.main import app
+
+# Only import app if not running unit tests that don't need it (can set SKIP_APP_INIT=1)
+if os.getenv("SKIP_APP_INIT") != "1":
+    from app.main import app
+else:
+    app = None
 
 # ROOT = Path(__file__).resolve().parents[1]
 # sys.path.insert(0, str(ROOT))
