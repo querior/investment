@@ -12,6 +12,7 @@ alembic>=1.13
 fredapi>=0.5
 pandas>=2.0
 numpy>=1.26
+scipy>=1.11
 yfinance>=0.2
 python-dateutil>=2.8
 apscheduler>=3.10
