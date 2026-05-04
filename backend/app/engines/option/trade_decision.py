@@ -12,13 +12,14 @@ class TradeAction(Enum):
 
 @dataclass
 class TradeDecision:
-    """Final trade decision after L1→L4 pipeline."""
+    """Final trade decision after L1→L5 pipeline."""
 
     action: TradeAction
     score: float             # OpportunityEvaluation.composite_score
     reasoning: str           # Brief explanation of decision
     threshold_open: float    # Threshold for OPEN (default 75)
     threshold_skip: float    # Threshold for SKIP (default 60)
+    strategy_spec: object | None = None  # StrategySpec (populated if action == OPEN)
 
 
 def make_trade_decision(

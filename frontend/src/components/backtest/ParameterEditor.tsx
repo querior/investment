@@ -364,6 +364,50 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 			label: "Ticker",
 			description: "Underlying ticker symbol (IWM, SPY, QQQ, etc.).",
 		},
+
+		// Decision Layer - Thresholds
+		"decision.threshold_open": {
+			label: "Decision Score Threshold (Open)",
+			description:
+				"Minimum composite opportunity score (0-100) to OPEN a position. Typical: 75. Below = no trade.",
+		},
+		"decision.threshold_monitor": {
+			label: "Decision Score Threshold (Monitor)",
+			description:
+				"Opportunity score threshold (0-100) for MONITOR status. Between this and threshold_open = borderline, worth monitoring.",
+		},
+		"decision.max_bid_ask_pct": {
+			label: "Max Bid/Ask Spread %",
+			description:
+				"Maximum tolerable bid/ask spread as % of mark price. Higher spread = lower execution quality. Typical: 15%.",
+		},
+
+		// Decision Layer - Opportunity Scoring Weights
+		"opportunity.weight_edge": {
+			label: "Weight: Pricing Edge",
+			description:
+				"Weight for pricing edge dimension (fair value vs market) in opportunity score (0-1). Typical: 0.35 (highest priority).",
+		},
+		"opportunity.weight_rr": {
+			label: "Weight: Risk/Reward",
+			description:
+				"Weight for risk/reward ratio dimension (max gain vs max loss) in opportunity score (0-1). Typical: 0.25.",
+		},
+		"opportunity.weight_bep": {
+			label: "Weight: Breakeven Reachability",
+			description:
+				"Weight for breakeven reachability dimension (distance to BEP in sigmas) in opportunity score (0-1). Typical: 0.20.",
+		},
+		"opportunity.weight_execution": {
+			label: "Weight: Execution Cost",
+			description:
+				"Weight for execution cost dimension (bid/ask impact) in opportunity score (0-1). Typical: 0.15.",
+		},
+		"opportunity.weight_efficiency": {
+			label: "Weight: Capital Efficiency",
+			description:
+				"Weight for capital efficiency dimension (theta profit per dollar risked) in opportunity score (0-1). Typical: 0.05 (lowest priority).",
+		},
 	};
 
 const ENTRY_PARAMS = [
@@ -396,6 +440,16 @@ const ENTRY_PARAMS = [
 	"entry_size.threshold_reduced",
 	"entry_size.multiplier_full",
 	"entry_size.multiplier_reduced",
+	// Decision Layer thresholds (L1-L5 pipeline)
+	"decision.threshold_open",
+	"decision.threshold_monitor",
+	"decision.max_bid_ask_pct",
+	// Opportunity scoring weights (L4)
+	"opportunity.weight_edge",
+	"opportunity.weight_rr",
+	"opportunity.weight_bep",
+	"opportunity.weight_execution",
+	"opportunity.weight_efficiency",
 ];
 
 const STRATEGY_PARAMS = [

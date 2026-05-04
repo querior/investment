@@ -1,1 +1,10 @@
-{}
+{
+  "tests/backtest/domain/decision/test_opportunity_evaluator.py::TestBreakevenScore::test_breakeven_very_far": true,
+  "tests/backtest/domain/decision/test_opportunity_evaluator.py::TestCompositeScore::test_perfect_score": true,
+  "tests/backtest/domain/decision/test_opportunity_evaluator.py::TestCompositeScore::test_zero_score": true,
+  "tests/backtest/domain/decision/test_opportunity_evaluator.py::TestFullPipelineL1toL4::test_no_trade_strategy_pipeline": true,
+  "tests/engines/option/test_opportunity_evaluator.py::TestBreakevenScore::test_breakeven_very_far": true,
+  "tests/engines/option/test_opportunity_evaluator.py::TestCompositeScore::test_perfect_score": true,
+  "tests/engines/option/test_opportunity_evaluator.py::TestCompositeScore::test_zero_score": true,
+  "tests/engines/option/test_opportunity_evaluator.py::TestFullPipelineL1toL4::test_no_trade_strategy_pipeline": true
+}

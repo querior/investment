@@ -33,6 +33,7 @@ from app.backtest.data_preparation.base import prepare_market_df
 from app.backtest.data_preparation.pipeline import build_backtest_dataset
 from app.backtest.domain.strategy.selectors import select_strategy
 from app.backtest.domain.option.ev import compute_trade_ev
+from app.engines.option import DecisionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,44 @@ def _build_entry_config(params_dict: dict) -> dict:
         "entry_size.threshold_reduced": float(_get("entry_size.threshold_reduced", "60")),
         "entry_size.multiplier_full": float(_get("entry_size.multiplier_full", "1.0")),
         "entry_size.multiplier_reduced": float(_get("entry_size.multiplier_reduced", "0.75")),
+    }
+
+
+def _build_position_config(params_dict: dict) -> dict:
+    """
+    Costruisce il config di position sizing dai BacktestRunParameter.
+    Usato da DecisionEngine per il calcolo della size dei contratti.
+    """
+    def _get(key: str, default: str) -> str:
+        p = params_dict.get(key)
+        return p["value"] if p else default
+
+    return {
+        "size_multiplier": 1.0,
+        "available_risk": float(_get("max_risk", "0.03")),
+    }
+
+
+def _build_risk_config(params_dict: dict) -> dict:
+    """
+    Costruisce il config di rischio per il Decision Layer (L1-L5).
+    Include soglie di decision score e pesi del scoring multidimensionale.
+    """
+    def _get(key: str, default: str) -> str:
+        p = params_dict.get(key)
+        return p["value"] if p else default
+
+    return {
+        "threshold_open": float(_get("decision.threshold_open", "75")),
+        "threshold_monitor": float(_get("decision.threshold_monitor", "60")),
+        "max_bid_ask_pct": float(_get("decision.max_bid_ask_pct", "15")) / 100.0,
+        "weights": {
+            "edge": float(_get("opportunity.weight_edge", "0.35")),
+            "risk_reward": float(_get("opportunity.weight_rr", "0.25")),
+            "breakeven": float(_get("opportunity.weight_bep", "0.20")),
+            "execution": float(_get("opportunity.weight_execution", "0.15")),
+            "efficiency": float(_get("opportunity.weight_efficiency", "0.05")),
+        },
     }
 
 
@@ -394,6 +433,8 @@ def run_eod_backtest(
     instrument=None,
     exit_config: dict | None = None,
     entry_config: dict | None = None,
+    position_config: dict | None = None,
+    risk_config: dict | None = None,
     target_delta_short: float | None = None,
     target_delta_long: float | None = None,
 ) -> None:
@@ -406,6 +447,14 @@ def run_eod_backtest(
     cleanup_eod_backtest_run(db, run.id)
 
     logger.warning(f"Start backtest execution -> {df.tail()}")
+
+    # Initialize Decision Engine (L1-L5 pipeline)
+    engine = DecisionEngine()
+    if position_config is None:
+        position_config = {}
+    if risk_config is None:
+        risk_config = {}
+
     try:
         portfolio = Portfolio(initial_cash=initial_cash)
         position_ids: dict[int,int] = {}
@@ -490,7 +539,23 @@ def run_eod_backtest(
 
             if not has_open_positions:
                 logger.warning(f"[ENTRY CHECK {date}] Portfolio empty, checking for entry. IV={iv:.2f}, IV_RANK={row.get('iv_rank', 'N/A')}, ADX={row.get('adx', 'N/A')}, RSI={row.get('rsi_14', 'N/A')}")
-                strategy = select_strategy(row, entry_config or {})
+
+                # Decision Engine L1-L5 pipeline
+                decision = engine.process_signal(
+                    row=row,
+                    entry_config=entry_config or {},
+                    position_config=position_config or {},
+                    risk_config=risk_config or {},
+                )
+
+                logger.warning(f"[L5 DECISION {date}] Action={decision.action.value}, Score={decision.score:.1f}, Reasoning={decision.reasoning}")
+
+                # Fall back to legacy select_strategy if no strategy_spec from engine
+                if decision.action.value == "OPEN" and decision.strategy_spec:
+                    strategy = decision.strategy_spec
+                else:
+                    strategy = select_strategy(row, entry_config or {})
+
                 logger.warning(f"[ENTRY RESULT {date}] Strategy={strategy.name}, should_trade={strategy.should_trade}, size_multiplier={strategy.size_multiplier:.0%}")
 
                 # Check cooldown: strategy cannot reopen within cooldown_days
@@ -505,7 +570,10 @@ def run_eod_backtest(
                         in_cooldown = True
                         logger.warning(f"[ENTRY COOLDOWN {date}] Strategy {strategy.name} in cooldown ({days_since_close} days < {cooldown_days})")
 
-                if strategy.should_trade and strategy.size_multiplier > 0 and not in_cooldown:
+                # Open if DecisionEngine says OPEN and passes cooldown
+                should_open = (decision.action.value == "OPEN" and not in_cooldown) or (strategy.should_trade and strategy.size_multiplier > 0 and not in_cooldown)
+
+                if should_open:
                     logger.warning(f"[ENTRY ACCEPT {date}] Opening position")
                     q = instrument.dividend_yield if instrument else 0.0
                     new_position = strategy.builder(
@@ -714,6 +782,10 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
     exit_config = _build_exit_config(params_dict)
     logger.warning(f"[RUN {run.id}] Building entry config")
     entry_config = _build_entry_config(params_dict)
+    logger.warning(f"[RUN {run.id}] Building position config")
+    position_config = _build_position_config(params_dict)
+    logger.warning(f"[RUN {run.id}] Building risk config (Decision Layer)")
+    risk_config = _build_risk_config(params_dict)
 
     logger.warning(f"[RUN {run.id}] Extracting delta parameters")
     delta_short_param = params_dict.get("entry.target_delta_short")
@@ -734,14 +806,16 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
 
     logger.warning(f"[RUN {run.id}] Starting EOD backtest execution with {len(df)} data points")
     run_eod_backtest(
-        db, 
-        run, 
+        db,
+        run,
         df,
         initial_cash=initial_capital,
         entry_every_n_days=entry_every_n_days,
         instrument=instrument,
         exit_config=exit_config,
         entry_config=entry_config,
+        position_config=position_config,
+        risk_config=risk_config,
         target_delta_short=target_delta_short,
         target_delta_long=target_delta_long,
     )

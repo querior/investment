@@ -74,6 +74,10 @@ class DecisionEngine:
             # Level 5: Trade Decision
             decision = make_trade_decision(evaluation, position_config)
 
+            # Attach strategy_spec to decision if action is OPEN
+            if decision.action == TradeAction.OPEN:
+                decision.strategy_spec = strategy_spec
+
             return decision
 
         except Exception as e:

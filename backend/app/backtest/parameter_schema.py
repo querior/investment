@@ -477,6 +477,74 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
     },
 
     # =========================================================================
+    # DECISION LAYER PARAMETERS (L1-L5)
+    # =========================================================================
+    "decision.threshold_open": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "75",
+        "unit": "value",
+        "precision": 0,
+    },
+    "decision.threshold_monitor": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "60",
+        "unit": "value",
+        "precision": 0,
+    },
+    "decision.max_bid_ask_pct": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "15",
+        "unit": "pct",
+        "precision": 1,
+    },
+    "opportunity.weight_edge": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.35",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "opportunity.weight_rr": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.25",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "opportunity.weight_bep": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.20",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "opportunity.weight_execution": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.15",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "opportunity.weight_efficiency": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.05",
+        "unit": "ratio",
+        "precision": 2,
+    },
+
+    # =========================================================================
     # GLOBAL/HEADER PARAMETERS
     # =========================================================================
     "symbol": {
