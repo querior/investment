@@ -9,6 +9,7 @@ import {
 	Input,
 	Popconfirm,
 	Skeleton,
+	Tabs,
 } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
@@ -45,6 +46,7 @@ import PerformanceTable from "./PerformanceTable";
 import AllocationTable from "./Long/AllocationTable";
 import PositionsTable from "./Short/PortfolioPerformanceTable";
 import ParameterEditor from "../../components/backtest/ParameterEditor";
+import DecisionLogsViewer from "./DecisionLogs";
 
 const STATUS_BADGE: Record<
 	BacktestStatus,
@@ -503,7 +505,22 @@ export default function BacktestRunDetail() {
 			{currentBacktest?.frequency === "EOM" && <AllocationTable />}
 
 			{/* Portfolio performances table */}
-			{currentBacktest?.frequency === "EOD" && <PositionsTable />}
+			{currentBacktest?.frequency === "EOD" && (
+				<Tabs
+					items={[
+						{
+							label: "Decision Logs",
+							key: "1",
+							children: <DecisionLogsViewer />,
+						},
+						{
+							label: "Positions",
+							key: "2",
+							children: <PositionsTable />,
+						},
+					]}
+				/>
+			)}
 		</div>
 	);
 }

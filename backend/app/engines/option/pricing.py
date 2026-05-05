@@ -59,9 +59,9 @@ def black_scholes(
 
 def calculate_pricing(
     spec: StrategySpec,
-    row: pd.Series,
+    row: pd.Series | dict,
     entry_config: dict,
-) -> PricingContext:
+) -> PricingContext | None:
     """
     Calculate pricing and Greeks for a strategy position.
 
@@ -74,8 +74,11 @@ def calculate_pricing(
         entry_config: Config dict with delta targets, pricing params
 
     Returns:
-        PricingContext with fair_value, market_price, Greeks, edge
+        PricingContext with fair_value, market_price, Greeks, edge; None if spec has no builder
     """
+    if spec.builder is None:
+        return None
+
     spot = row["close"]
     iv = row["iv"]
     dte_days = int(row.get("dte_days", 45))

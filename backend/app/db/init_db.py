@@ -17,6 +17,7 @@ from app.db.market_price import MarketPrice
 from app.db.meta_ingestion import IngestionState
 from app.db.user import User
 from app.db.allocation_history import AllocationHistory
+from app.db.decision_log import DecisionLog
 
 
 def init_db():

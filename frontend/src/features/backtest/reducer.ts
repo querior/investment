@@ -12,6 +12,8 @@ import type {
 	RunParameter,
 	RunWeightDto,
 	StrategyPerformance,
+	DecisionLog,
+	DecisionLogsState,
 } from "./types";
 
 const initialState: BacktestState = {
@@ -42,6 +44,15 @@ const initialState: BacktestState = {
 	},
 	navData: [],
 	backtestConfig: null,
+	decisionLogs: {
+		items: [],
+		page: 1,
+		page_size: 50,
+		total: 0,
+		loading: false,
+		error: null,
+		filters: {},
+	},
 };
 
 const slice = createSlice({
@@ -282,6 +293,43 @@ const slice = createSlice({
 			state.loading = false;
 			state.backtestConfig = action.payload;
 		},
+		// --- decision logs ---
+		fetchDecisionLogsRequest(
+			state,
+			_action: PayloadAction<{
+				backtestId: number;
+				runId: number;
+				skip?: number;
+				limit?: number;
+				filters?: DecisionLogsState["filters"];
+			}>
+		) {
+			state.decisionLogs.loading = true;
+			state.decisionLogs.error = null;
+		},
+		fetchDecisionLogsSuccess(
+			state,
+			action: PayloadAction<{
+				logs: DecisionLog[];
+				total: number;
+				skip: number;
+				limit: number;
+				run_id: number;
+			}>
+		) {
+			state.decisionLogs.loading = false;
+			state.decisionLogs.items = action.payload.logs;
+			state.decisionLogs.total = action.payload.total;
+			state.decisionLogs.page =
+				Math.floor(action.payload.skip / action.payload.limit) + 1;
+			state.decisionLogs.page_size = action.payload.limit;
+		},
+		setDecisionLogsFilters(
+			state,
+			action: PayloadAction<DecisionLogsState["filters"]>
+		) {
+			state.decisionLogs.filters = action.payload;
+		},
 		// --- execute run ---
 		executeRunRequest(
 			state,
@@ -392,6 +440,9 @@ export const {
 	fetchPortfolioPerformanceSuccess,
 	fetchBacktestConfigRequest,
 	fetchBacktestConfigSuccess,
+	fetchDecisionLogsRequest,
+	fetchDecisionLogsSuccess,
+	setDecisionLogsFilters,
 	backtestActionFailure,
 } = slice.actions;
 

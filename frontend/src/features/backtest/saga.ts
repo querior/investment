@@ -18,6 +18,7 @@ import {
 	invalidateRunApi,
 	cloneRunApi,
 	getPerformanceApi,
+	getDecisionLogsApi,
 } from "../../services/backtest-service";
 import {
 	fetchBacktestsRequest,
@@ -55,6 +56,8 @@ import {
 	fetchBacktestConfigRequest,
 	fetchBacktestConfigSuccess,
 	cloneRunRequest,
+	fetchDecisionLogsRequest,
+	fetchDecisionLogsSuccess,
 	backtestActionFailure,
 } from "./reducer";
 
@@ -324,6 +327,29 @@ function* fetchPortfolioPerformancesEffect(
 	}
 }
 
+function* fetchDecisionLogsEffect(
+	action: ReturnType<typeof fetchDecisionLogsRequest>
+): any {
+	try {
+		const { backtestId, runId, skip = 0, limit = 50, filters } = action.payload;
+		const data = yield call(
+			getDecisionLogsApi,
+			backtestId,
+			runId,
+			skip,
+			limit,
+			filters
+		);
+		yield put(fetchDecisionLogsSuccess(data));
+	} catch (e: any) {
+		yield put(
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to load decision logs"
+			)
+		);
+	}
+}
+
 export function* backtestWatcher() {
 	yield takeLatest(fetchBacktestsRequest.type, fetchBacktestsEffect);
 	yield takeLatest(fetchBacktestRequest.type, fetchBacktestEffect);
@@ -346,4 +372,5 @@ export function* backtestWatcher() {
 		fetchPortfolioPerformancesEffect
 	);
 	yield takeLatest(fetchBacktestConfigRequest.type, fetchBacktestConfigEffect);
+	yield takeLatest(fetchDecisionLogsRequest.type, fetchDecisionLogsEffect);
 }

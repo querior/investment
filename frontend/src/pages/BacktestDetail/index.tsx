@@ -290,7 +290,7 @@ export default function BacktestDetail() {
 						size="small"
 						columns={columns}
 						dataSource={runs}
-						loading={positionLoading}
+						loading={loading}
 						pagination={false}
 						scroll={{ x: "max-content" }}
 						onRow={(run) => ({

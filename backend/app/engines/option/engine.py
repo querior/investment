@@ -4,6 +4,9 @@ Option Decision Engine — Orchestrates L1→L5 decision pipeline.
 Converts market signals into trade decisions for options strategies.
 """
 
+import logging
+import pandas as pd
+
 from .models import Zone, Trend
 from .zone_classifier import classify_zone
 from .strategy_selector import select_strategy, calculate_position_size
@@ -11,6 +14,8 @@ from .pricing import calculate_pricing
 from .opportunity_evaluator import evaluate_opportunity
 from .trade_decision import make_trade_decision, TradeAction, TradeDecision
 from app.backtest.domain.strategy import no_trade_strategy
+
+logger = logging.getLogger(__name__)
 
 
 class DecisionEngine:
@@ -23,7 +28,7 @@ class DecisionEngine:
 
     def process_signal(
         self,
-        row: dict | None = None,
+        row: pd.Series | dict | None = None,
         entry_config: dict | None = None,
         position_config: dict | None = None,
         risk_config: dict | None = None,
@@ -68,15 +73,24 @@ class DecisionEngine:
             # Level 3: Pricing & Greeks
             pricing = calculate_pricing(strategy_spec, row, entry_config)
 
+            # Skip pricing/evaluation for no-trade strategies
+            if pricing is None:
+                return self._create_skip_decision("No-trade strategy selected")
+
             # Level 4: Opportunity Evaluation
             evaluation = evaluate_opportunity(pricing, entry_config, risk_config)
 
             # Level 5: Trade Decision
             decision = make_trade_decision(evaluation, position_config)
 
+            logger.warning(f"[ENGINE L5] action={decision.action.value}, score={decision.score:.1f}")
+
             # Attach strategy_spec to decision if action is OPEN
             if decision.action == TradeAction.OPEN:
                 decision.strategy_spec = strategy_spec
+                logger.warning(f"[ENGINE L5] Attached strategy_spec={strategy_spec.name if strategy_spec else None}")
+            else:
+                logger.warning(f"[ENGINE L5] action is not OPEN, strategy_spec remains None")
 
             return decision
 

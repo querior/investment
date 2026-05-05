@@ -27,6 +27,7 @@ from app.services.config_repo import get_neutral_allocation, get_allocation_para
 from app.db.allocation_adjustment import AllocationAdjustment
 from app.db.allocation_history import AllocationHistory
 from app.db.macro_regimes import MacroRegime
+from app.db.decision_log import DecisionLog
 from app.backtest.metrics import compute_metrics, compute_run_eod_metrics
 from .domain.models import Portfolio
 from app.backtest.data_preparation.base import prepare_market_df
@@ -465,7 +466,7 @@ def run_eod_backtest(
         total_trades = 0
         recent_closes: dict[str, str] = {}  # Track strategy close dates for cooldown
 
-        for i, (_, row) in enumerate(df.iterrows()):
+        for _, row in df.iterrows():
             date = pd.to_datetime(row["date"]).date().isoformat()
             S = float(row["close"])
             iv = float(row["iv"])
@@ -550,13 +551,59 @@ def run_eod_backtest(
 
                 logger.warning(f"[L5 DECISION {date}] Action={decision.action.value}, Score={decision.score:.1f}, Reasoning={decision.reasoning}")
 
-                # Fall back to legacy select_strategy if no strategy_spec from engine
-                if decision.action.value == "OPEN" and decision.strategy_spec:
-                    strategy = decision.strategy_spec
-                else:
-                    strategy = select_strategy(row, entry_config or {})
+                # Use strategy from decision engine
+                if decision.action.value == "OPEN" and decision.strategy_spec is None:
+                    logger.error(f"[L5 ERROR {date}] Action is OPEN but strategy_spec is None! Reasoning: {decision.reasoning}")
+                    continue
 
-                logger.warning(f"[ENTRY RESULT {date}] Strategy={strategy.name}, should_trade={strategy.should_trade}, size_multiplier={strategy.size_multiplier:.0%}")
+                strategy = cast(Any, decision.strategy_spec)
+
+                # Log decision to database
+                iv_rank_val = row.get("iv_rank")
+                adx_val = row.get("adx")
+
+                # Extract strategy fields or use defaults if no strategy
+                strategy_name_log = strategy.name if strategy else "N/A"
+                size_multiplier_log = strategy.size_multiplier if strategy else 0.0
+                should_trade_log = strategy.should_trade if strategy else False
+
+                if strategy:
+                    logger.warning(f"[ENTRY RESULT {date}] Strategy={strategy_name_log}, should_trade={should_trade_log}, size_multiplier={size_multiplier_log:.0%}")
+                else:
+                    logger.warning(f"[ENTRY DECISION {date}] Action={decision.action.value}, no strategy (as expected)")
+
+                decision_log = DecisionLog(
+                    run_id=run.id,
+                    date=date,
+                    zone=str(row.get("zone", "")).replace("Zone.", "") if row.get("zone") else None,
+                    trend=str(row.get("trend_signal", "")).replace("Trend.", "") if row.get("trend_signal") else None,
+                    iv_rank=float(iv_rank_val) if iv_rank_val is not None else None,
+                    adx=float(adx_val) if adx_val is not None else None,
+                    entry_score=float(row.get("entry_score", 0)),
+                    strategy_name=strategy_name_log,
+                    size_multiplier=size_multiplier_log,
+                    should_trade=should_trade_log,
+                    spot=float(row.get("close", 0)),
+                    iv=float(row.get("iv", 0)),
+                    dte_days=int(row.get("dte_days", 45)),
+                    delta=None,
+                    gamma=None,
+                    vega=None,
+                    theta=None,
+                    bid_ask_spread=None,
+                    bid_ask_pct=None,
+                    edge=None,
+                    breakeven_distance=None,
+                    decision_action=decision.action.value,
+                    decision_score=decision.score,
+                    decision_reasoning=decision.reasoning,
+                )
+                db.add(decision_log)
+                db.commit()
+
+                # Skip entry logic if no strategy (SKIP/MONITOR decisions)
+                if not strategy:
+                    continue
 
                 # Check cooldown: strategy cannot reopen within cooldown_days
                 cooldown_days_param = entry_config.get("entry.cooldown_days") if entry_config else None

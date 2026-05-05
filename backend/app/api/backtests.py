@@ -4,7 +4,7 @@ from datetime import date
 from datetime import date as date_type
 from sqlalchemy.orm import Session, selectinload
 from threading import Thread
-from typing import cast
+from typing import cast, Optional, List
 from app.db.session import SessionLocal
 from app.backtest.runs import run_in_background
 from app.backtest.schemas.backtest import Backtest
@@ -19,6 +19,7 @@ from app.backtest.schemas.backtest_run import BacktestFrequency, BacktestRun, Ba
 from app.backtest.schemas.backtest_weight import BacktestWeight
 from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
 from app.db.allocation_history import AllocationHistory
+from app.db.decision_log import DecisionLog
 from app.backtest.parameter_schema import validate_parameters, PARAMETER_SCHEMA
 from datetime import datetime
 import logging
@@ -950,5 +951,107 @@ def position_history(backtest_id: int, run_id: int, position_id: int, db: Sessio
                 "is_open": s.is_open,
             }
             for s in snapshots
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# Decision Logs
+# ---------------------------------------------------------------------------
+
+class DecisionLogFilter(BaseModel):
+    decision_actions: Optional[List[str]] = None
+    strategy_names: Optional[List[str]] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    min_entry_score: Optional[float] = None
+    max_entry_score: Optional[float] = None
+    min_size_multiplier: Optional[float] = None
+    max_size_multiplier: Optional[float] = None
+
+
+class GetDecisionLogsRequest(BaseModel):
+    skip: int = 0
+    limit: int = 20
+    filters: Optional[DecisionLogFilter] = None
+
+
+@router.post("/backtests/{backtest_id}/runs/{run_id}/decision_logs")
+def get_decision_logs(
+    backtest_id: int,
+    run_id: int,
+    req: GetDecisionLogsRequest,
+    db: Session = Depends(get_db),
+):
+    """Recupera i decision logs con paginazione e filtri."""
+    _get_backtest_or_404(backtest_id, db)
+    _get_run_or_404(backtest_id, run_id, db)
+
+    query = db.query(DecisionLog).filter(DecisionLog.run_id == run_id)
+    logger.warning(f"[DECISION_LOGS] run_id={run_id}, total_before_filter={query.count()}")
+    logger.warning(f"[DECISION_LOGS] filters={req.filters}")
+
+    if req.filters:
+        if req.filters.decision_actions:
+            query = query.filter(DecisionLog.decision_action.in_(req.filters.decision_actions))
+
+        if req.filters.strategy_names:
+            query = query.filter(DecisionLog.strategy_name.in_(req.filters.strategy_names))
+
+        if req.filters.date_from:
+            query = query.filter(DecisionLog.date >= req.filters.date_from)
+
+        if req.filters.date_to:
+            query = query.filter(DecisionLog.date <= req.filters.date_to)
+
+        if req.filters.min_entry_score is not None:
+            query = query.filter(DecisionLog.entry_score >= req.filters.min_entry_score)
+
+        if req.filters.max_entry_score is not None:
+            query = query.filter(DecisionLog.entry_score <= req.filters.max_entry_score)
+
+        if req.filters.min_size_multiplier is not None:
+            query = query.filter(DecisionLog.size_multiplier >= req.filters.min_size_multiplier)
+
+        if req.filters.max_size_multiplier is not None:
+            query = query.filter(DecisionLog.size_multiplier <= req.filters.max_size_multiplier)
+
+    logger.warning(f"[DECISION_LOGS] total_after_filter={query.count()}")
+    total = query.count()
+    logs = query.order_by(DecisionLog.date.desc()).offset(req.skip).limit(req.limit).all()
+
+    return {
+        "run_id": run_id,
+        "total": total,
+        "skip": req.skip,
+        "limit": req.limit,
+        "logs": [
+            {
+                "id": log.id,
+                "date": log.date,
+                "zone": log.zone,
+                "trend": log.trend,
+                "iv_rank": log.iv_rank,
+                "adx": log.adx,
+                "entry_score": log.entry_score,
+                "strategy_name": log.strategy_name,
+                "size_multiplier": log.size_multiplier,
+                "should_trade": log.should_trade,
+                "spot": log.spot,
+                "iv": log.iv,
+                "dte_days": log.dte_days,
+                "delta": log.delta,
+                "gamma": log.gamma,
+                "vega": log.vega,
+                "theta": log.theta,
+                "bid_ask_spread": log.bid_ask_spread,
+                "bid_ask_pct": log.bid_ask_pct,
+                "edge": log.edge,
+                "breakeven_distance": log.breakeven_distance,
+                "decision_action": log.decision_action,
+                "decision_score": log.decision_score,
+                "decision_reasoning": log.decision_reasoning,
+            }
+            for log in logs
         ]
     }

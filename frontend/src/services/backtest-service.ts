@@ -186,3 +186,27 @@ export const getPositionHistoryApi = async (
 	);
 	return res.data;
 };
+
+export const getDecisionLogsApi = async (
+	backtestId: number,
+	runId: number,
+	skip: number = 0,
+	limit: number = 50,
+	filters?: any
+): Promise<{
+	run_id: number;
+	total: number;
+	skip: number;
+	limit: number;
+	logs: any[];
+}> => {
+	const res = await api.post(
+		`/backtests/${backtestId}/runs/${runId}/decision_logs`,
+		{
+			skip,
+			limit,
+			filters: filters || {},
+		}
+	);
+	return res.data;
+};

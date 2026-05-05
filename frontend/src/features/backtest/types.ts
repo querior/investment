@@ -216,6 +216,8 @@ export type BacktestState = {
 	navData: NavDataPoint[];
 	// backtest config
 	backtestConfig: BacktestConfigDto | null;
+	// decision logs
+	decisionLogs: DecisionLogsState;
 };
 
 export const STATUS_BADGE: Record<
@@ -247,3 +249,50 @@ export const INSTRUMENT_OPTIONS: {
 	{ value: "options", label: "Options" },
 	{ value: "futures", label: "Futures" },
 ];
+
+// Decision Logs
+export type DecisionLog = {
+	id: number;
+	date: string;
+	zone: string | null;
+	trend: string | null;
+	iv_rank: number | null;
+	adx: number | null;
+	entry_score: number | null;
+	strategy_name: string;
+	size_multiplier: number;
+	should_trade: boolean;
+	spot: number | null;
+	iv: number | null;
+	dte_days: number | null;
+	delta: number | null;
+	gamma: number | null;
+	vega: number | null;
+	theta: number | null;
+	bid_ask_spread: number | null;
+	bid_ask_pct: number | null;
+	edge: number | null;
+	breakeven_distance: number | null;
+	decision_action: string;
+	decision_score: number;
+	decision_reasoning: string | null;
+};
+
+export type DecisionLogsState = {
+	items: DecisionLog[];
+	page: number;
+	page_size: number;
+	total: number;
+	loading: boolean;
+	error: string | null;
+	filters?: {
+		decision_actions?: string[];
+		strategy_names?: string[];
+		date_from?: string;
+		date_to?: string;
+		min_entry_score?: number;
+		max_entry_score?: number;
+		min_size_multiplier?: number;
+		max_size_multiplier?: number;
+	};
+};
