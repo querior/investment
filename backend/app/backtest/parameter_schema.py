@@ -3,7 +3,26 @@ Parameter schema for backtest runs.
 Defines valid ranges, types, and defaults for all configurable parameters.
 """
 
+import json
 from typing import TypedDict, Any
+
+# Default configuration for each option strategy.
+# Used as initial values for strategy_config.overrides parameter.
+STRATEGY_DEFAULTS: dict[str, dict] = {
+    "bull_put_spread":     {"enabled": True, "delta_short": 0.20, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "bear_call_spread":    {"enabled": True, "delta_short": 0.20, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "iron_condor":         {"enabled": True, "delta_short": 0.10, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 40, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "iron_butterfly":      {"enabled": True, "delta_short": 0.50, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 25, "stop_loss_pct": 200, "dte_exit_days": 14, "size_multiplier": 0.7},
+    "bull_call_spread":    {"enabled": True, "delta_short": 0.10, "delta_long": 0.30, "delta_long_call": 0.30, "profit_target_pct": 60, "stop_loss_pct": 100, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "bear_put_spread":     {"enabled": True, "delta_short": 0.10, "delta_long": 0.30, "delta_long_call": 0.10, "profit_target_pct": 60, "stop_loss_pct": 100, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "long_straddle":       {"enabled": True, "delta_short": 0.50, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 100, "stop_loss_pct": 50, "dte_exit_days": 30, "size_multiplier": 0.8},
+    "long_strangle":       {"enabled": True, "delta_short": 0.30, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 100, "stop_loss_pct": 50, "dte_exit_days": 30, "size_multiplier": 0.8},
+    "neutral_broken_wing": {"enabled": True, "delta_short": 0.15, "delta_long": 0.05, "delta_long_call": 0.05, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "jade_lizard":         {"enabled": True, "delta_short": 0.20, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "reverse_jade_lizard": {"enabled": True, "delta_short": 0.20, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
+    "calendar_spread":     {"enabled": True, "delta_short": 0.40, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 50, "stop_loss_pct": 100, "dte_exit_days": 7,  "size_multiplier": 0.8},
+    "diagonal_spread":     {"enabled": True, "delta_short": 0.30, "delta_long": 0.15, "delta_long_call": 0.15, "profit_target_pct": 50, "stop_loss_pct": 100, "dte_exit_days": 14, "size_multiplier": 0.8},
+}
 
 
 class ParameterDef(TypedDict, total=False):
@@ -50,30 +69,6 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
         "default": "1.1",
         "unit": "ratio",
         "precision": 1,
-    },
-    "entry.target_delta_short": {
-        "type": "float",
-        "min": 0.0,
-        "max": 1.0,
-        "default": "0.16",
-        "unit": "value",
-        "precision": 2,
-    },
-    "entry.target_delta_long": {
-        "type": "float",
-        "min": 0.0,
-        "max": 1.0,
-        "default": "0.05",
-        "unit": "value",
-        "precision": 2,
-    },
-    "entry.target_delta_long_call": {
-        "type": "float",
-        "min": 0.0,
-        "max": 1.0,
-        "default": "0.10",
-        "unit": "value",
-        "precision": 2,
     },
     "entry.cooldown_days": {
         "type": "int",
@@ -587,6 +582,15 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
     "debug.force_open": {
         "type": "bool",
         "default": "true",
+        "unit": "value",
+    },
+
+    # =========================================================================
+    # PER-STRATEGY CONFIGURATION
+    # =========================================================================
+    "strategy_config.overrides": {
+        "type": "json",
+        "default": json.dumps(STRATEGY_DEFAULTS),
         "unit": "value",
     },
 }

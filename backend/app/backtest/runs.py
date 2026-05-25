@@ -447,16 +447,8 @@ def run_eod_backtest(
     entry_config: dict | None = None,
     position_config: dict | None = None,
     risk_config: dict | None = None,
-    target_delta_short: float | None = None,
-    target_delta_long: float | None = None,
-    target_delta_long_call: float = 0.10,
+    strategy_overrides: dict | None = None,
 ) -> None:
-    if target_delta_short is None or target_delta_long is None:
-        raise ValueError(
-            "target_delta_short e target_delta_long sono obbligatori. "
-            "Aggiungili come BacktestRunParameter (entry.target_delta_short, entry.target_delta_long)."
-        )
-
     cleanup_eod_backtest_run(db, run.id)
 
     logger.warning(f"Start backtest execution -> {df.tail()}")
@@ -519,12 +511,33 @@ def run_eod_backtest(
                 db.add(pos_snapshot)
                 db.commit()
 
-            # 3. close logic
+            # 3. close logic — merge global exit_config with per-strategy overrides
+            _overrides = strategy_overrides or {}
             for position in portfolio.positions:
+                s_cfg = _overrides.get(position.name, {})
+                pos_exit_config = dict(exit_config or {})
+                if s_cfg.get("profit_target_pct") is not None:
+                    pos_exit_config["rule_profit_target"] = {
+                        **pos_exit_config.get("rule_profit_target", {}),
+                        "threshold_pct": float(s_cfg["profit_target_pct"]),
+                        "enabled": True,
+                    }
+                if s_cfg.get("stop_loss_pct") is not None:
+                    pos_exit_config["rule_stop_loss"] = {
+                        **pos_exit_config.get("rule_stop_loss", {}),
+                        "threshold_pct": float(s_cfg["stop_loss_pct"]),
+                        "enabled": True,
+                    }
+                if s_cfg.get("dte_exit_days") is not None:
+                    pos_exit_config["rule_dte"] = {
+                        **pos_exit_config.get("rule_dte", {}),
+                        "threshold_days": float(s_cfg["dte_exit_days"]),
+                        "enabled": True,
+                    }
                 should_exit, exit_conditions = should_close(ExitContext(
                     position=position,
                     row=row,
-                    exit_config=exit_config or {},
+                    exit_config=pos_exit_config,
                 ))
                 if position.is_open and should_exit:
                     exit_reason = exit_conditions.get("triggered_by") if exit_conditions else "unknown"
@@ -615,6 +628,7 @@ def run_eod_backtest(
                     entry_config=entry_config or {},
                     position_config=position_config or {},
                     risk_config=risk_config or {},
+                    strategy_overrides=strategy_overrides or {},
                 )
 
                 logger.warning(f"[L5 DECISION {date}] Action={decision.action.value}, Score={decision.score:.1f}, Reasoning={decision.reasoning}")
@@ -694,6 +708,7 @@ def run_eod_backtest(
                 if should_open:
                     logger.warning(f"[ENTRY ACCEPT {date}] Opening position")
                     q = instrument.dividend_yield if instrument else 0.0
+                    s_cfg = (strategy_overrides or {}).get(strategy.name, {})
                     new_position = strategy.builder(
                         date=date,
                         S=S,
@@ -701,9 +716,9 @@ def run_eod_backtest(
                         dte_days=45,
                         quantity=1,
                         q=q,
-                        target_delta_short=target_delta_short,
-                        target_delta_long=target_delta_long,
-                        target_delta_long_call=target_delta_long_call,
+                        target_delta_short=s_cfg.get("delta_short", 0.16),
+                        target_delta_long=s_cfg.get("delta_long", 0.05),
+                        target_delta_long_call=s_cfg.get("delta_long_call", 0.10),
                     )
 
                     # Compute EV with qty=1 to get per-contract max_loss for risk check
@@ -905,24 +920,14 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
     logger.warning(f"[RUN {run.id}] Building risk config (Decision Layer)")
     risk_config = _build_risk_config(params_dict)
 
-    logger.warning(f"[RUN {run.id}] Extracting delta parameters")
-    delta_short_param = params_dict.get("entry.target_delta_short")
-    delta_long_param = params_dict.get("entry.target_delta_long")
-    if delta_short_param is None or delta_long_param is None:
-        missing = []
-        if delta_short_param is None:
-            missing.append("entry.target_delta_short")
-        if delta_long_param is None:
-            missing.append("entry.target_delta_long")
-        raise ValueError(
-            f"Parametri obbligatori mancanti per la strike selection: {', '.join(missing)}. "
-            "Aggiungili nella configurazione del run (es. target_delta_short=0.16, target_delta_long=0.05)."
-        )
-    target_delta_short = float(delta_short_param["value"])
-    target_delta_long = float(delta_long_param["value"])
-    delta_long_call_param = params_dict.get("entry.target_delta_long_call")
-    target_delta_long_call = float(delta_long_call_param["value"]) if delta_long_call_param else 0.10
-    logger.warning(f"[RUN {run.id}] Target deltas: short={target_delta_short}, long={target_delta_long}, long_call={target_delta_long_call}")
+    # Parse per-strategy config overrides (strategy_config.overrides)
+    strategy_overrides: dict = {}
+    overrides_param = params_dict.get("strategy_config.overrides")
+    if overrides_param:
+        try:
+            strategy_overrides = json.loads(overrides_param["value"])
+        except (json.JSONDecodeError, KeyError):
+            logger.warning(f"[RUN {run.id}] strategy_config.overrides is not valid JSON, ignoring")
 
     logger.warning(f"[RUN {run.id}] Starting EOD backtest execution with {len(df)} data points")
     run_eod_backtest(
@@ -936,9 +941,7 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
         entry_config=entry_config,
         position_config=position_config,
         risk_config=risk_config,
-        target_delta_short=target_delta_short,
-        target_delta_long=target_delta_long,
-        target_delta_long_call=target_delta_long_call,
+        strategy_overrides=strategy_overrides,
     )
     logger.warning(f"[RUN {run.id}] EOD backtest execution completed")
 

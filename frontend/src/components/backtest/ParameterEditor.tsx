@@ -2,12 +2,14 @@ import { useState, useMemo } from "react";
 import {
 	Button,
 	Card,
+	Collapse,
 	Divider,
 	Form,
 	Input,
 	InputNumber,
 	Select,
 	Switch,
+	Tag,
 	Tabs,
 	Tooltip,
 } from "antd";
@@ -206,21 +208,6 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 		},
 
 		// Entry - Strike Delta
-		"entry.target_delta_short": {
-			label: "Target Delta (Short)",
-			description:
-				"Target delta for short call/put strikes (0-1). Higher = closer to ATM, lower = further OTM.",
-		},
-		"entry.target_delta_long": {
-			label: "Target Delta (Long Put)",
-			description:
-				"Target delta for long protective puts in put spreads (0-1). Higher = closer to ATM, lower = further OTM.",
-		},
-		"entry.target_delta_long_call": {
-			label: "Target Delta (Long Call)",
-			description:
-				"Target delta for the protection/cap leg in call spreads (BCS, BuCS). Default 0.10 — narrower spread, better risk/reward than using the put delta (0.05).",
-		},
 		"entry.cooldown_days": {
 			label: "Cooldown After Close (days)",
 			description:
@@ -448,14 +435,6 @@ const STRATEGY_SECTIONS = [
 			"strategy.allocation_alpha",
 		],
 	},
-	{
-		title: "Strike Selection",
-		params: [
-			"entry.target_delta_short",
-			"entry.target_delta_long",
-			"entry.target_delta_long_call",
-		],
-	},
 ];
 
 const SCORING_SECTIONS = [
@@ -506,13 +485,8 @@ const SIZING_PARAMS = [
 	"entry_size.multiplier_reduced",
 ];
 
+// Profit target, stop loss e DTE exit sono ora configurati per-strategia nel tab Strategie.
 const EXIT_PARAMS = [
-	"exit.rule_dte.enabled",
-	"exit.rule_dte.threshold_days",
-	"exit.rule_profit_target.enabled",
-	"exit.rule_profit_target.threshold_pct",
-	"exit.rule_stop_loss.enabled",
-	"exit.rule_stop_loss.threshold_pct",
 	"exit.rule_trailing_stop.enabled",
 	"exit.rule_trailing_stop.min_profit_pct",
 	"exit.rule_trailing_stop.pullback_pct",
@@ -547,6 +521,55 @@ const SYSTEM_SECTIONS = [
 	},
 ];
 
+// ── Per-strategy config ──────────────────────────────────────────────────────
+
+interface StrategyConfig {
+	enabled: boolean;
+	delta_short: number;
+	delta_long: number;
+	delta_long_call: number;
+	profit_target_pct: number;
+	stop_loss_pct: number;
+	dte_exit_days: number;
+	size_multiplier: number;
+}
+
+const STRATEGY_META: Record<string, { label: string; zone: string }> = {
+	bull_put_spread:     { label: "Bull Put Spread",      zone: "B" },
+	bear_call_spread:    { label: "Bear Call Spread",     zone: "B" },
+	iron_condor:         { label: "Iron Condor",          zone: "D" },
+	iron_butterfly:      { label: "Iron Butterfly",       zone: "D" },
+	bull_call_spread:    { label: "Bull Call Spread",     zone: "A" },
+	bear_put_spread:     { label: "Bear Put Spread",      zone: "A" },
+	long_straddle:       { label: "Long Straddle",        zone: "C" },
+	long_strangle:       { label: "Long Strangle",        zone: "C" },
+	neutral_broken_wing: { label: "Neutral Broken Wing",  zone: "A/C" },
+	jade_lizard:         { label: "Jade Lizard",          zone: "B" },
+	reverse_jade_lizard: { label: "Reverse Jade Lizard",  zone: "B" },
+	calendar_spread:     { label: "Calendar Spread",      zone: "D" },
+	diagonal_spread:     { label: "Diagonal Spread",      zone: "D" },
+};
+
+const ZONE_COLOR: Record<string, string> = {
+	A: "blue", B: "orange", C: "green", D: "purple", "A/C": "cyan",
+};
+
+const DEFAULT_STRATEGY_CONFIG: Record<string, StrategyConfig> = {
+	bull_put_spread:     { enabled: true, delta_short: 0.20, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
+	bear_call_spread:    { enabled: true, delta_short: 0.20, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
+	iron_condor:         { enabled: true, delta_short: 0.10, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 40,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
+	iron_butterfly:      { enabled: true, delta_short: 0.50, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 25,  stop_loss_pct: 200, dte_exit_days: 14, size_multiplier: 0.7 },
+	bull_call_spread:    { enabled: true, delta_short: 0.10, delta_long: 0.30, delta_long_call: 0.30, profit_target_pct: 60,  stop_loss_pct: 100, dte_exit_days: 21, size_multiplier: 1.0 },
+	bear_put_spread:     { enabled: true, delta_short: 0.10, delta_long: 0.30, delta_long_call: 0.10, profit_target_pct: 60,  stop_loss_pct: 100, dte_exit_days: 21, size_multiplier: 1.0 },
+	long_straddle:       { enabled: true, delta_short: 0.50, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 100, stop_loss_pct: 50,  dte_exit_days: 30, size_multiplier: 0.8 },
+	long_strangle:       { enabled: true, delta_short: 0.30, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 100, stop_loss_pct: 50,  dte_exit_days: 30, size_multiplier: 0.8 },
+	neutral_broken_wing: { enabled: true, delta_short: 0.15, delta_long: 0.05, delta_long_call: 0.05, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
+	jade_lizard:         { enabled: true, delta_short: 0.20, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
+	reverse_jade_lizard: { enabled: true, delta_short: 0.20, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
+	calendar_spread:     { enabled: true, delta_short: 0.40, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 50,  stop_loss_pct: 100, dte_exit_days: 7,  size_multiplier: 0.8 },
+	diagonal_spread:     { enabled: true, delta_short: 0.30, delta_long: 0.15, delta_long_call: 0.15, profit_target_pct: 50,  stop_loss_pct: 100, dte_exit_days: 14, size_multiplier: 0.8 },
+};
+
 export default function ParameterEditor({
 	currentRun,
 	backtestConfig,
@@ -567,6 +590,26 @@ export default function ParameterEditor({
 		}
 		return initial;
 	});
+
+	const [strategyDraft, setStrategyDraft] = useState<Record<string, StrategyConfig>>(() => {
+		const raw = currentRun?.parameters?.["strategy_config.overrides"];
+		const jsonStr = typeof raw === "string" ? raw : (raw as any)?.value;
+		if (jsonStr) {
+			try { return { ...DEFAULT_STRATEGY_CONFIG, ...JSON.parse(jsonStr) }; } catch {}
+		}
+		return DEFAULT_STRATEGY_CONFIG;
+	});
+
+	const updateStrategyField = (
+		strategy: string,
+		field: keyof StrategyConfig,
+		value: boolean | number,
+	) => {
+		setStrategyDraft((prev) => ({
+			...prev,
+			[strategy]: { ...prev[strategy], [field]: value },
+		}));
+	};
 
 	const paramSchema = useMemo(
 		() => (backtestConfig as any)?.parameterSchema || {},
@@ -600,6 +643,8 @@ export default function ParameterEditor({
 				params[key] = String(paramSchema[key].default);
 			}
 		}
+
+		params["strategy_config.overrides"] = JSON.stringify(strategyDraft);
 
 		onSave(params);
 	};
@@ -759,6 +804,98 @@ export default function ParameterEditor({
 		);
 	};
 
+	const ENTRY_FIELDS = [
+		{ field: "delta_short"     as const, label: "Δ Short",         min: 0,   max: 1,  step: 0.01, prec: 2 },
+		{ field: "delta_long"      as const, label: "Δ Long",          min: 0,   max: 1,  step: 0.01, prec: 2 },
+		{ field: "delta_long_call" as const, label: "Δ Long Call",     min: 0,   max: 1,  step: 0.01, prec: 2 },
+		{ field: "size_multiplier" as const, label: "Size Multiplier", min: 0.1, max: 2,  step: 0.1,  prec: 1 },
+	];
+
+	const EXIT_FIELDS = [
+		{ field: "profit_target_pct" as const, label: "Profit Target %", min: 0, max: 500,  step: 5,  prec: 0 },
+		{ field: "stop_loss_pct"     as const, label: "Stop Loss %",     min: 0, max: 1000, step: 10, prec: 0 },
+		{ field: "dte_exit_days"     as const, label: "DTE Exit (days)", min: 1, max: 90,   step: 1,  prec: 0 },
+	];
+
+	const renderStrategyFields = (key: string, cfg: StrategyConfig, fields: typeof ENTRY_FIELDS | typeof EXIT_FIELDS) =>
+		fields.map(({ field, label, min, max, step, prec }) => (
+			<Form.Item key={field} label={label} style={{ marginBottom: 4 }}>
+				<InputNumber
+					size="small"
+					value={cfg[field] as number}
+					onChange={(v) => updateStrategyField(key, field, v ?? 0)}
+					min={min}
+					max={max}
+					step={step}
+					precision={prec}
+					disabled={!cfg.enabled}
+					style={{ width: "100%" }}
+				/>
+			</Form.Item>
+		));
+
+	const renderStrategyAccordion = () => {
+		const items = Object.entries(STRATEGY_META).map(([key, meta]) => {
+			const cfg = strategyDraft[key] ?? DEFAULT_STRATEGY_CONFIG[key];
+			return {
+				key,
+				label: (
+					<div className="flex items-center gap-2 w-full pr-2">
+						<Switch
+							size="small"
+							checked={cfg.enabled}
+							onChange={(v) => updateStrategyField(key, "enabled", v)}
+						/>
+						<span className={cfg.enabled ? "font-medium" : "text-gray-400"}>
+							{meta.label}
+						</span>
+						<Tag
+							color={ZONE_COLOR[meta.zone] ?? "default"}
+							style={{ marginLeft: "auto", fontSize: 10 }}
+						>
+							Zone {meta.zone}
+						</Tag>
+					</div>
+				),
+				children: (
+					<div>
+						<div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Entry</div>
+						<div className="grid grid-cols-2 gap-x-4 gap-y-1">
+							{renderStrategyFields(key, cfg, ENTRY_FIELDS)}
+						</div>
+						<Divider style={{ margin: "10px 0" }} />
+						<div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Exit</div>
+						<div className="grid grid-cols-2 gap-x-4 gap-y-1">
+							{renderStrategyFields(key, cfg, EXIT_FIELDS)}
+						</div>
+					</div>
+				),
+			};
+		});
+
+		return (
+			<div style={{ paddingTop: 8 }}>
+				<Collapse
+					size="small"
+					collapsible="icon"
+					items={items}
+					ghost
+				/>
+				<div className="flex justify-end mt-3">
+					<Button
+						size="small"
+						type="primary"
+						icon={<CheckOutlined />}
+						onClick={handleSave}
+						loading={loading}
+					>
+						Salva strategie
+					</Button>
+				</div>
+			</div>
+		);
+	};
+
 	const renderSections = (
 		sections: Array<{ title: string; params: string[] }>
 	) => (
@@ -853,8 +990,20 @@ export default function ParameterEditor({
 						},
 						{
 							key: "strategia",
-							label: "Strategia",
-							children: renderSections(STRATEGY_SECTIONS),
+							label: "Strategie",
+							children: (
+								<>
+									{renderSections(STRATEGY_SECTIONS)}
+									<Divider
+										orientation="left"
+										orientationMargin={0}
+										style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 0 }}
+									>
+										Configurazione per Strategia
+									</Divider>
+									{renderStrategyAccordion()}
+								</>
+							),
 						},
 						{
 							key: "scoring",

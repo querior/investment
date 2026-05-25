@@ -54,6 +54,7 @@ def select_strategy(
     adx: float = 20,
     trend_signal: int = 0,
     entry_score: float = 50,
+    strategy_overrides: dict | None = None,
 ) -> StrategySpec:
     """
     Select strategy based on zone and market conditions.
@@ -68,10 +69,12 @@ def select_strategy(
         adx: 0-100, used for Zone D Calendar vs IC ranking
         trend_signal: raw int signal (-1/0/1), used for Zone D Diagonal ranking
         entry_score: 0-100, converted to size_multiplier
+        strategy_overrides: per-strategy config dict from strategy_config.overrides parameter
 
     Returns:
-        StrategySpec with size_multiplier applied
+        StrategySpec with size_multiplier applied, or no_trade if strategy is disabled
     """
+    overrides = strategy_overrides or {}
     condition = trend
 
     if zone == Zone.C:
@@ -97,13 +100,22 @@ def select_strategy(
     if not candidates:
         return no_trade_strategy()
 
-    if len(candidates) == 1:
-        spec = candidates[0]()
-        spec.size_multiplier = calculate_position_size(entry_score)
-        return spec
+    # Filter out disabled strategies before ranking
+    enabled_candidates = [
+        c for c in candidates
+        if overrides.get(c().name, {}).get("enabled", True)
+    ]
+    if not enabled_candidates:
+        return no_trade_strategy()
 
-    spec = rank_strategies(candidates, zone, iv_rank, adx, trend_signal)
-    spec.size_multiplier = calculate_position_size(entry_score)
+    if len(enabled_candidates) == 1:
+        spec = enabled_candidates[0]()
+    else:
+        spec = rank_strategies(enabled_candidates, zone, iv_rank, adx, trend_signal)
+
+    base_size = calculate_position_size(entry_score)
+    strategy_cfg = overrides.get(spec.name, {})
+    spec.size_multiplier = base_size * strategy_cfg.get("size_multiplier", 1.0)
     return spec
 
 

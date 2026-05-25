@@ -32,6 +32,7 @@ class DecisionEngine:
         entry_config: dict | None = None,
         position_config: dict | None = None,
         risk_config: dict | None = None,
+        strategy_overrides: dict | None = None,
     ) -> TradeDecision:
         """
         Process a market signal through all 5 decision levels.
@@ -73,6 +74,7 @@ class DecisionEngine:
                 adx=adx,
                 trend_signal=trend_raw if isinstance(trend_raw, int) else trend.value,
                 entry_score=entry_score,
+                strategy_overrides=strategy_overrides,
             )
 
             # Level 3: Pricing & Greeks
