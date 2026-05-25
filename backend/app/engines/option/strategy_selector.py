@@ -19,26 +19,31 @@ from .models import Zone, Trend
 
 STRATEGY_MATRIX = {
     Zone.A: {
-        Trend.UP: [bull_call_spread_strategy],
-        Trend.DOWN: [bear_put_spread_strategy],
+        Trend.UP:      [bull_call_spread_strategy],
+        Trend.DOWN:    [bear_put_spread_strategy],
         Trend.NEUTRAL: [neutral_broken_wing_strategy],
     },
     Zone.B: {
-        Trend.UP: [bull_put_strategy, jade_lizard_strategy],
-        Trend.DOWN: [bear_call_strategy, reverse_jade_lizard_strategy],
+        Trend.UP:      [bull_put_strategy, jade_lizard_strategy],
+        Trend.DOWN:    [bear_call_strategy, reverse_jade_lizard_strategy],
         Trend.NEUTRAL: [no_trade_strategy],
     },
     Zone.C: {
-        "high_squeeze": [long_straddle_strategy],
+        "high_squeeze":   [long_straddle_strategy],
         "medium_squeeze": [long_strangle_strategy],
-        "low_squeeze": [neutral_broken_wing_strategy],
+        "low_squeeze":    [neutral_broken_wing_strategy],
     },
     Zone.D: {
         "very_high_iv": [iron_butterfly_strategy],
-        "high_iv": [iron_condor_strategy, calendar_spread_strategy],
-        "neutral": [jade_lizard_strategy, diagonal_spread_strategy],
+        "high_iv":      [iron_condor_strategy, calendar_spread_strategy],
+        "neutral":      [jade_lizard_strategy, diagonal_spread_strategy],
     },
 }
+
+# IV rank threshold above which more aggressive premium-selling is warranted (Zone B)
+_IV_RANK_AGGRESSIVE = 50.0
+# ADX threshold below which the market is considered ultra-lateral (Zone D / Calendar)
+_ADX_ULTRA_LATERAL = 15.0
 
 
 def select_strategy(
@@ -46,16 +51,22 @@ def select_strategy(
     trend,
     squeeze_intensity: float = 0,
     iv_rank: float = 50,
+    adx: float = 20,
+    trend_signal: int = 0,
     entry_score: float = 50,
 ) -> StrategySpec:
     """
-    Select strategy based on zone and conditions.
+    Select strategy based on zone and market conditions.
+
+    See ADR 005 for the full zone × strategy matrix and ranking criteria.
 
     Args:
         zone: Zone A/B/C/D from zone_classifier
-        trend: Trend.UP/DOWN/NEUTRAL or string condition for Zone C/D
+        trend: Trend enum (UP/DOWN/NEUTRAL) for Zone A/B
         squeeze_intensity: 0-100 for Zone C sub-classification
-        iv_rank: 0-100 for Zone D sub-classification
+        iv_rank: 0-100, used for Zone B/D ranking
+        adx: 0-100, used for Zone D Calendar vs IC ranking
+        trend_signal: raw int signal (-1/0/1), used for Zone D Diagonal ranking
         entry_score: 0-100, converted to size_multiplier
 
     Returns:
@@ -91,25 +102,40 @@ def select_strategy(
         spec.size_multiplier = calculate_position_size(entry_score)
         return spec
 
-    best = rank_strategies(candidates, entry_score, iv_rank, zone)
-    best.size_multiplier = calculate_position_size(entry_score)
-    return best
+    spec = rank_strategies(candidates, zone, iv_rank, adx, trend_signal)
+    spec.size_multiplier = calculate_position_size(entry_score)
+    return spec
 
 
 def rank_strategies(
     candidates: list,
-    entry_score: float,
-    iv_rank: float,
     zone: Zone,
+    iv_rank: float,
+    adx: float,
+    trend_signal: int,
 ) -> StrategySpec:
-    """Rank strategies by quality metrics when multiple candidates exist."""
+    """
+    Rank candidates by market conditions — see ADR 005.
+
+    Zone B UP:   BPS vs Jade Lizard       → JL when iv_rank > 50 (more premium available)
+    Zone B DOWN: BCS vs Reverse JL        → RJL when iv_rank > 50
+    Zone D high_iv: IC vs Calendar        → Calendar when adx < 15 (ultra-lateral)
+    Zone D neutral: JL vs Diagonal        → Diagonal when abs(trend_signal) > 0
+    """
     if len(candidates) == 1:
         return candidates[0]()
 
     if zone == Zone.B:
+        # candidates[0] = BPS or BCS (conservative), candidates[1] = JL or RJL (aggressive)
+        if iv_rank > _IV_RANK_AGGRESSIVE:
+            return candidates[1]()
         return candidates[0]()
 
     if zone == Zone.D:
+        # high_iv: candidates[0]=IC, candidates[1]=Calendar
+        # neutral:  candidates[0]=JL, candidates[1]=Diagonal
+        if adx < _ADX_ULTRA_LATERAL or abs(trend_signal) > 0:
+            return candidates[1]()
         return candidates[0]()
 
     return candidates[0]()

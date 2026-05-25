@@ -200,7 +200,7 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 		},
 
 		// Risk
-		"max_risk": {
+		max_risk: {
 			label: "Max Risk",
 			description: "Maximum allowed risk per trade (percentage).",
 		},
@@ -212,9 +212,14 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 				"Target delta for short call/put strikes (0-1). Higher = closer to ATM, lower = further OTM.",
 		},
 		"entry.target_delta_long": {
-			label: "Target Delta (Long)",
+			label: "Target Delta (Long Put)",
 			description:
-				"Target delta for long protective calls/puts (0-1). Higher = closer to ATM, lower = further OTM.",
+				"Target delta for long protective puts in put spreads (0-1). Higher = closer to ATM, lower = further OTM.",
+		},
+		"entry.target_delta_long_call": {
+			label: "Target Delta (Long Call)",
+			description:
+				"Target delta for the protection/cap leg in call spreads (BCS, BuCS). Default 0.10 — narrower spread, better risk/reward than using the put delta (0.05).",
 		},
 		"entry.cooldown_days": {
 			label: "Cooldown After Close (days)",
@@ -225,7 +230,8 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 		// Entry Scoring - Weights
 		"entry_score.w1_iv_rank": {
 			label: "Weight: IV Rank",
-			description: "Weight for IV Rank component in entry score (0-1). Normalized with other weights.",
+			description:
+				"Weight for IV Rank component in entry score (0-1). Normalized with other weights.",
 		},
 		"entry_score.w2_iv_hv": {
 			label: "Weight: IV/HV Ratio",
@@ -241,7 +247,8 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 		},
 		"entry_score.w5_dte": {
 			label: "Weight: DTE Score",
-			description: "Weight for Days to Expiration component in entry score (0-1).",
+			description:
+				"Weight for Days to Expiration component in entry score (0-1).",
 		},
 		"entry_score.w6_volume": {
 			label: "Weight: Volume Ratio",
@@ -338,29 +345,36 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 		},
 
 		// Pipeline - Volatility Bounds
-		"alpha_volatility": {
+		alpha_volatility: {
 			label: "Alpha Volatility",
 			description:
 				"Scaling factor for volatility-based position sizing. Higher = more size in high vol.",
 		},
-		"iv_min": {
+		iv_min: {
 			label: "IV Minimum",
 			description:
 				"Absolute minimum IV threshold for any entry (0-1). Filters out ultra-low premium.",
 		},
-		"iv_max": {
+		iv_max: {
 			label: "IV Maximum",
 			description:
 				"Absolute maximum IV threshold for any entry (0-2). Filters out excessive premium.",
 		},
 
+		// Debug
+		"debug.force_open": {
+			label: "Force Open",
+			description:
+				"Bypassa il threshold L5 e apre ogni candidato valido. Modalità raccomandata fino alla ricalibratura dei pesi opportunity score (Sprint 3). Con false, L5 tende a filtrare le credit strategies per bias strutturale nel R/R score.",
+		},
+
 		// Execution
-		"entry_every_n_days": {
+		entry_every_n_days: {
 			label: "Entry Every N Days",
 			description:
 				"Frequency of entry signals (days). 30 = check for new entries every 30 days.",
 		},
-		"ticker": {
+		ticker: {
 			label: "Ticker",
 			description: "Underlying ticker symbol (IWM, SPY, QQQ, etc.).",
 		},
@@ -410,52 +424,86 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 		},
 	};
 
-const ENTRY_PARAMS = [
-	// Basic entry filters
+const HEADER_PARAMS = [
+	"symbol",
+	"ticker",
+	"initial_capital",
+	"entry_every_n_days",
+];
+
+const FILTER_PARAMS = [
 	"entry.iv_min_threshold",
 	"entry.rsi_min_bull",
 	"entry.iv_min_neutral",
 	"entry.iv_rv_ratio_min",
-	"entry.target_delta_short",
-	"entry.target_delta_long",
 	"entry.cooldown_days",
+];
+
+const STRATEGY_SECTIONS = [
+	{
+		title: "Allocazione",
+		params: [
+			"strategy.initial_allocation",
+			"strategy.coherence_factor",
+			"strategy.allocation_alpha",
+		],
+	},
+	{
+		title: "Strike Selection",
+		params: [
+			"entry.target_delta_short",
+			"entry.target_delta_long",
+			"entry.target_delta_long_call",
+		],
+	},
+];
+
+const SCORING_SECTIONS = [
+	{
+		title: "L4 — Entry Score Weights",
+		params: [
+			"entry_score.w1_iv_rank",
+			"entry_score.w2_iv_hv",
+			"entry_score.w3_squeeze",
+			"entry_score.w4_rsi",
+			"entry_score.w5_dte",
+			"entry_score.w6_volume",
+		],
+	},
+	{
+		title: "L4 — DTE Range",
+		params: [
+			"entry_score.dte_min",
+			"entry_score.dte_optimal_min",
+			"entry_score.dte_optimal_max",
+			"entry_score.dte_max",
+		],
+	},
+	{
+		title: "L4 — RSI Neutrality",
+		params: ["entry_score.rsi_neutral_min", "entry_score.rsi_neutral_max"],
+	},
+	{
+		title: "L5 — Decision",
+		params: [
+			"decision.threshold_open",
+			"decision.threshold_monitor",
+			"decision.max_bid_ask_pct",
+			"opportunity.weight_edge",
+			"opportunity.weight_rr",
+			"opportunity.weight_bep",
+			"opportunity.weight_execution",
+			"opportunity.weight_efficiency",
+		],
+	},
+];
+
+const SIZING_PARAMS = [
 	"max_risk",
-	// Entry scoring weights
-	"entry_score.w1_iv_rank",
-	"entry_score.w2_iv_hv",
-	"entry_score.w3_squeeze",
-	"entry_score.w4_rsi",
-	"entry_score.w5_dte",
-	"entry_score.w6_volume",
-	// Entry scoring - DTE optimal range
-	"entry_score.dte_min",
-	"entry_score.dte_optimal_min",
-	"entry_score.dte_optimal_max",
-	"entry_score.dte_max",
-	// Entry scoring - RSI neutrality
-	"entry_score.rsi_neutral_min",
-	"entry_score.rsi_neutral_max",
-	// Position sizing
 	"entry_size.threshold_full",
 	"entry_size.threshold_reduced",
 	"entry_size.multiplier_full",
 	"entry_size.multiplier_reduced",
-	// Decision Layer thresholds (L1-L5 pipeline)
-	"decision.threshold_open",
-	"decision.threshold_monitor",
-	"decision.max_bid_ask_pct",
-	// Opportunity scoring weights (L4)
-	"opportunity.weight_edge",
-	"opportunity.weight_rr",
-	"opportunity.weight_bep",
-	"opportunity.weight_execution",
-	"opportunity.weight_efficiency",
-];
-
-const STRATEGY_PARAMS = [
-	"strategy.initial_allocation",
-	"strategy.coherence_factor",
-	"strategy.allocation_alpha",
 ];
 
 const EXIT_PARAMS = [
@@ -479,18 +527,25 @@ const EXIT_PARAMS = [
 	"exit.rule_theta_decay.threshold_ratio",
 ];
 
-const PIPELINE_PARAMS = [
-	"iv_rank.lookback_days",
-	"adx.period",
-	"squeeze.bb_percentile",
-	"squeeze.macd_threshold",
-	"volume.sma_period",
-	"alpha_volatility",
-	"iv_min",
-	"iv_max",
+const SYSTEM_SECTIONS = [
+	{
+		title: "Indicatori",
+		params: [
+			"iv_rank.lookback_days",
+			"adx.period",
+			"squeeze.bb_percentile",
+			"squeeze.macd_threshold",
+			"volume.sma_period",
+			"alpha_volatility",
+			"iv_min",
+			"iv_max",
+		],
+	},
+	{
+		title: "Debug",
+		params: ["debug.force_open"],
+	},
 ];
-
-const HEADER_PARAMS = ["symbol", "ticker", "initial_capital", "entry_every_n_days"];
 
 export default function ParameterEditor({
 	currentRun,
@@ -522,12 +577,17 @@ export default function ParameterEditor({
 		const params: Record<string, string> = {};
 
 		// Fallback: if paramSchema is empty, extract keys from draft + current run
-		const paramKeys = Object.keys(paramSchema).length > 0
-			? Object.keys(paramSchema)
-			: [...new Set([
-				...Object.keys(draft),
-				...(currentRun?.parameters ? Object.keys(currentRun.parameters) : [])
-			])];
+		const paramKeys =
+			Object.keys(paramSchema).length > 0
+				? Object.keys(paramSchema)
+				: [
+						...new Set([
+							...Object.keys(draft),
+							...(currentRun?.parameters
+								? Object.keys(currentRun.parameters)
+								: []),
+						]),
+				  ];
 
 		// Send all parameters, using draft values, currentRun values, or defaults from schema
 		for (const key of paramKeys) {
@@ -544,8 +604,15 @@ export default function ParameterEditor({
 		onSave(params);
 	};
 
+	const PARAM_TYPE_OVERRIDES: Record<string, Partial<ParameterSchema>> = {
+		"debug.force_open": { type: "bool", default: "false" },
+	};
+
 	const renderField = (paramKey: string) => {
-		const schema: ParameterSchema = paramSchema[paramKey] || {};
+		const schema: ParameterSchema = {
+			...(paramSchema[paramKey] ?? {}),
+			...(PARAM_TYPE_OVERRIDES[paramKey] ?? {}),
+		};
 		const hint = PARAMETER_HINTS[paramKey];
 		const currentValue = draft[paramKey] ?? schema.default ?? "";
 		const precision = (schema as any).precision ?? 2;
@@ -692,6 +759,32 @@ export default function ParameterEditor({
 		);
 	};
 
+	const renderSections = (
+		sections: Array<{ title: string; params: string[] }>
+	) => (
+		<div style={{ paddingTop: 12 }}>
+			{sections.map(({ title, params }, i) => (
+				<div key={title}>
+					<Divider
+						orientation="left"
+						orientationMargin={0}
+						style={{
+							fontSize: 12,
+							color: "#888",
+							marginTop: i === 0 ? 4 : 16,
+							marginBottom: 8,
+						}}
+					>
+						{title}
+					</Divider>
+					<div className="grid grid-cols-2 gap-2">
+						{params.map(renderField)}
+					</div>
+				</div>
+			))}
+		</div>
+	);
+
 	return (
 		<Card
 			size="small"
@@ -740,31 +833,43 @@ export default function ParameterEditor({
 				<Tabs
 					tabBarExtraContent={
 						<Tooltip title="Parameters are validated server-side. Invalid values will be rejected with detailed error messages.">
-							<InfoCircleOutlined style={{ color: "#666", cursor: "pointer", fontSize: "16px" }} />
+							<InfoCircleOutlined
+								style={{ color: "#666", cursor: "pointer", fontSize: "16px" }}
+							/>
 						</Tooltip>
 					}
 					items={[
 						{
-							key: "entry",
-							label: "Entry",
+							key: "filtri",
+							label: "Filtri",
 							children: (
 								<div
 									className="grid grid-cols-2 gap-2"
 									style={{ paddingTop: 12 }}
 								>
-									{ENTRY_PARAMS.map(renderField)}
+									{FILTER_PARAMS.map(renderField)}
 								</div>
 							),
 						},
 						{
-							key: "strategy",
-							label: "Strategy",
+							key: "strategia",
+							label: "Strategia",
+							children: renderSections(STRATEGY_SECTIONS),
+						},
+						{
+							key: "scoring",
+							label: "Scoring",
+							children: renderSections(SCORING_SECTIONS),
+						},
+						{
+							key: "sizing",
+							label: "Sizing",
 							children: (
 								<div
 									className="grid grid-cols-2 gap-2"
 									style={{ paddingTop: 12 }}
 								>
-									{STRATEGY_PARAMS.map(renderField)}
+									{SIZING_PARAMS.map(renderField)}
 								</div>
 							),
 						},
@@ -781,14 +886,29 @@ export default function ParameterEditor({
 							),
 						},
 						{
-							key: "pipeline",
-							label: "Pipeline",
+							key: "system",
+							label: "System",
 							children: (
-								<div
-									className="grid grid-cols-2 gap-2"
-									style={{ paddingTop: 12 }}
-								>
-									{PIPELINE_PARAMS.map(renderField)}
+								<div style={{ paddingTop: 12 }}>
+									{renderSections([SYSTEM_SECTIONS[0]])}
+									<Divider
+										orientation="left"
+										orientationMargin={0}
+										style={{
+											fontSize: 12,
+											color: "#888",
+											marginTop: 16,
+											marginBottom: 8,
+										}}
+									>
+										Debug
+									</Divider>
+									<div className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded p-2 mb-3">
+										Force Open è attivo per default: il threshold L5 è temporaneamente disabilitato perché l'opportunity score ha un bias strutturale contro le credit strategies. Verrà ricalibrато nel Sprint 3.
+									</div>
+									<div className="grid grid-cols-2 gap-2">
+										{SYSTEM_SECTIONS[1].params.map(renderField)}
+									</div>
 								</div>
 							),
 						},

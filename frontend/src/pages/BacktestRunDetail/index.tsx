@@ -34,10 +34,10 @@ import {
 	updateRunRequest,
 	invalidateRunRequest,
 	fetchPortfolioPerformanceRequest,
+	fetchRunMetricsRequest,
+	fetchDecisionMatrixRequest,
 } from "../../features/backtest/reducer";
 import type { RootState } from "../../store/reducers";
-import Chart from "../../components/charts/Chart";
-
 import { BacktestStatus, FrequencyType } from "../../features/backtest/types";
 import { capitalize } from "../../utils/string";
 import RegimeAdjustmentsCard from "./Long/RegimeAdjustmentCard";
@@ -47,6 +47,8 @@ import AllocationTable from "./Long/AllocationTable";
 import PositionsTable from "./Short/PortfolioPerformanceTable";
 import ParameterEditor from "../../components/backtest/ParameterEditor";
 import DecisionLogsViewer from "./DecisionLogs";
+import DecisionMatrix from "./DecisionMatrix";
+import RunChartsRow from "./RunChartsRow";
 
 const STATUS_BADGE: Record<
 	BacktestStatus,
@@ -102,18 +104,10 @@ export default function BacktestRunDetail() {
 	};
 
 	const pollData = () => {
-		dispatch(
-			fetchRunStatusRequest({
-				backtestId,
-				runId: runIdNum,
-			})
-		);
-		dispatch(
-			fetchPortfolioPerformanceRequest({
-				backtestId,
-				runId: runIdNum,
-			})
-		);
+		dispatch(fetchRunStatusRequest({ backtestId, runId: runIdNum }));
+		dispatch(fetchPortfolioPerformanceRequest({ backtestId, runId: runIdNum }));
+		dispatch(fetchRunMetricsRequest({ backtestId, runId: runIdNum }));
+		dispatch(fetchDecisionMatrixRequest({ backtestId, runId: runIdNum }));
 	};
 
 	const handleExecute = () => {
@@ -406,9 +400,6 @@ export default function BacktestRunDetail() {
 								</div>
 							)}
 						</div>
-						{currentRun && (
-							<PerformanceTable performances={currentRun.performances} />
-						)}
 					</div>
 
 					{/* DIVIDER */}
@@ -480,26 +471,7 @@ export default function BacktestRunDetail() {
 			{/* Metrics */}
 			{currentRun && <Metrics currentRun={currentRun} />}
 
-			{/* NAV chart */}
-			<Card size="small" title="NAV">
-				<Chart
-					height={220}
-					showLegend={false}
-					yTickFormat={(v) => v.toFixed(2)}
-					series={[
-						{
-							key: "nav",
-							label: "NAV",
-							color: "#3b82f6",
-							type: "line",
-							data: navData.map((d) => ({
-								date: new Date(d.date),
-								value: d.nav,
-							})),
-						},
-					]}
-				/>
-			</Card>
+			<RunChartsRow />
 
 			{/* Allocation weights table */}
 			{currentBacktest?.frequency === "EOM" && <AllocationTable />}
@@ -509,6 +481,11 @@ export default function BacktestRunDetail() {
 				<Tabs
 					items={[
 						{
+							label: "Decision Matrix",
+							key: "0",
+							children: <DecisionMatrix />,
+						},
+						{
 							label: "Decision Logs",
 							key: "1",
 							children: <DecisionLogsViewer />,
@@ -517,6 +494,11 @@ export default function BacktestRunDetail() {
 							label: "Positions",
 							key: "2",
 							children: <PositionsTable />,
+						},
+						{
+							label: "Performance by Strategy",
+							key: "3",
+							children: <PerformanceTable performances={currentRun?.performances} />,
 						},
 					]}
 				/>

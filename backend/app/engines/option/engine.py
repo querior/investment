@@ -51,14 +51,17 @@ class DecisionEngine:
         if risk_config is None:
             risk_config = {}
 
+        zone_value: str | None = None
         try:
             # Level 1: Zone Classification
             iv_rank = row.get("iv_rank", 0.5)
             adx = row.get("adx", 20)
             zone = classify_zone(iv_rank, adx)
+            zone_value = zone.value
 
             # Level 2: Strategy Selection
-            trend = row.get("trend_signal", Trend.NEUTRAL)
+            trend_raw = row.get("trend_signal", Trend.NEUTRAL)
+            trend = Trend(trend_raw) if isinstance(trend_raw, int) else trend_raw
             squeeze_intensity = row.get("squeeze_intensity", 0.5)
             entry_score = row.get("entry_score", 50.0)
 
@@ -67,23 +70,30 @@ class DecisionEngine:
                 trend=trend,
                 squeeze_intensity=squeeze_intensity,
                 iv_rank=iv_rank,
+                adx=adx,
+                trend_signal=trend_raw if isinstance(trend_raw, int) else trend.value,
                 entry_score=entry_score,
             )
 
             # Level 3: Pricing & Greeks
             pricing = calculate_pricing(strategy_spec, row, entry_config)
 
-            # Skip pricing/evaluation for no-trade strategies
+            # No-trade strategy: zone known but no pricing/evaluation
             if pricing is None:
-                return self._create_skip_decision("No-trade strategy selected")
+                decision = self._create_skip_decision("No-trade strategy selected")
+                decision.zone = zone_value
+                return decision
 
             # Level 4: Opportunity Evaluation
             evaluation = evaluate_opportunity(pricing, entry_config, risk_config)
 
             # Level 5: Trade Decision
             decision = make_trade_decision(evaluation, position_config)
+            decision.edge_source = pricing.edge_source
+            decision.zone = zone_value
+            decision.evaluation = evaluation
 
-            logger.warning(f"[ENGINE L5] action={decision.action.value}, score={decision.score:.1f}")
+            logger.warning(f"[ENGINE L5] action={decision.action.value}, score={decision.score:.1f}, edge_source={decision.edge_source}")
 
             # Attach strategy_spec to decision if action is OPEN
             if decision.action == TradeAction.OPEN:
@@ -95,7 +105,9 @@ class DecisionEngine:
             return decision
 
         except Exception as e:
-            return self._create_skip_decision(f"Pipeline error: {str(e)}")
+            decision = self._create_skip_decision(f"Pipeline error: {str(e)}")
+            decision.zone = zone_value
+            return decision
 
     def _create_skip_decision(self, reason: str) -> TradeDecision:
         """Create a SKIP decision with a given reason."""

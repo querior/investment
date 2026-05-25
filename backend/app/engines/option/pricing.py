@@ -31,6 +31,10 @@ class PricingContext:
     edge: float
     breakeven_distance: float
 
+    # Tracks how edge was computed — see ADR 004.
+    # "market_price" = real feed (live), "synthetic_iv_rv" = IV/RV proxy (backtest)
+    edge_source: str = "market_price"
+
 
 def black_scholes(
     S: float, K: float, T: float, sigma: float, r: float, option_type: str
@@ -87,28 +91,15 @@ def calculate_pricing(
     target_delta_short = entry_config.get("target_delta_short", 0.16)
     target_delta_long = entry_config.get("target_delta_long", 0.05)
 
-    # Build position from strategy spec
-    # Some builders require delta targets, others don't (e.g. ATM straddle)
-    # Try with delta targets first, fall back to minimal params if not supported
-    try:
-        position = spec.builder(
-            date=date,
-            S=spot,
-            iv=iv,
-            dte_days=dte_days,
-            target_delta_short=target_delta_short,
-            target_delta_long=target_delta_long,
-            quantity=1,
-        )
-    except TypeError:
-        # Builder doesn't accept delta targets (e.g., long straddle/strangle at ATM/OTM)
-        position = spec.builder(
-            date=date,
-            S=spot,
-            iv=iv,
-            dte_days=dte_days,
-            quantity=1,
-        )
+    position = spec.builder(
+        date=date,
+        S=spot,
+        iv=iv,
+        dte_days=dte_days,
+        target_delta_short=target_delta_short,
+        target_delta_long=target_delta_long,
+        quantity=1,
+    )
 
     # Price each leg and calculate Greeks
     total_delta = 0.0
@@ -155,12 +146,26 @@ def calculate_pricing(
         total_theta += leg_theta * leg.sign
 
     # Market price (from row or fallback to fair value)
-    market_price = row.get("market_price", fair_value)
+    raw_market_price = row.get("market_price", None)
     bid_ask_pct = row.get("bid_ask_pct", 0.02)
-    bid_ask_spread = market_price * bid_ask_pct if market_price > 0 else 0
 
-    # Edge: our profit if buy at market and sell at fair value
-    edge = fair_value - market_price
+    if raw_market_price is not None:
+        # Live trading: real market price available
+        market_price = float(raw_market_price)
+        edge = fair_value - market_price
+        edge_source = "market_price"
+    else:
+        # Backtest: no real market price — synthetic edge from IV/RV premium (see ADR 004)
+        # abs(fair_value): edge is positive regardless of credit/debit direction —
+        # credit strategies (fair_value < 0) benefit from IV > RV just as much as debit ones.
+        market_price = fair_value
+        iv_val = float(row.get("iv", 0))
+        rv_val = float(row.get("rv_20", iv_val))
+        iv_premium = max(0.0, (iv_val - rv_val) / max(iv_val, 0.001))
+        edge = abs(fair_value) * iv_premium
+        edge_source = "synthetic_iv_rv"
+
+    bid_ask_spread = market_price * bid_ask_pct if market_price > 0 else 0
 
     # Breakeven distance: % move from spot to breakeven
     if spot > 0 and abs(total_delta) > 0.01:
@@ -187,4 +192,5 @@ def calculate_pricing(
         bid_ask_pct=bid_ask_pct,
         edge=edge,
         breakeven_distance=breakeven_distance,
+        edge_source=edge_source,
     )

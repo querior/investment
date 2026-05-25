@@ -19,6 +19,8 @@ import {
 	cloneRunApi,
 	getPerformanceApi,
 	getDecisionLogsApi,
+	getDecisionMatrixApi,
+	getRunMetricsApi,
 } from "../../services/backtest-service";
 import {
 	fetchBacktestsRequest,
@@ -58,6 +60,10 @@ import {
 	cloneRunRequest,
 	fetchDecisionLogsRequest,
 	fetchDecisionLogsSuccess,
+	fetchDecisionMatrixRequest,
+	fetchDecisionMatrixSuccess,
+	fetchRunMetricsRequest,
+	fetchRunMetricsSuccess,
 	backtestActionFailure,
 } from "./reducer";
 
@@ -308,14 +314,16 @@ function* fetchRunStatusEffect(
 function* fetchPortfolioPerformancesEffect(
 	action: ReturnType<typeof fetchPortfolioPerformanceRequest>
 ): any {
-	const { backtestId, runId, page = 1, limit = 20 } = action.payload;
+	const { backtestId, runId, page = 1, limit = 20, strategy, macro_regime } = action.payload;
 	try {
 		const data = yield call(
 			getPerformanceApi,
 			backtestId,
 			runId,
 			page,
-			limit
+			limit,
+			strategy,
+			macro_regime,
 		);
 		yield put(fetchPortfolioPerformanceSuccess(data));
 	} catch (e: any) {
@@ -350,6 +358,41 @@ function* fetchDecisionLogsEffect(
 	}
 }
 
+function* fetchDecisionMatrixEffect(
+	action: ReturnType<typeof fetchDecisionMatrixRequest>
+): any {
+	try {
+		const { backtestId, runId } = action.payload;
+		const data = yield call(getDecisionMatrixApi, backtestId, runId);
+		yield put(fetchDecisionMatrixSuccess({ rows: data.rows, zone_stats: data.zone_stats ?? {} }));
+	} catch (e: any) {
+		yield put(
+			backtestActionFailure(
+				e?.response?.data?.detail ?? "Failed to load decision matrix"
+			)
+		);
+	}
+}
+
+function* fetchRunMetricsEffect(
+	action: ReturnType<typeof fetchRunMetricsRequest>
+): any {
+	const { backtestId, runId } = action.payload;
+	try {
+		const data = yield call(getRunMetricsApi, backtestId, runId);
+		yield put(
+			fetchRunMetricsSuccess({
+				summary: data.summary,
+				nav: data.nav ?? [],
+				portfolio_timeseries: data.portfolio_timeseries ?? [],
+				performances: data.performances,
+			})
+		);
+	} catch {
+		// Silently fail — metrics polling is best-effort during execution
+	}
+}
+
 export function* backtestWatcher() {
 	yield takeLatest(fetchBacktestsRequest.type, fetchBacktestsEffect);
 	yield takeLatest(fetchBacktestRequest.type, fetchBacktestEffect);
@@ -373,4 +416,6 @@ export function* backtestWatcher() {
 	);
 	yield takeLatest(fetchBacktestConfigRequest.type, fetchBacktestConfigEffect);
 	yield takeLatest(fetchDecisionLogsRequest.type, fetchDecisionLogsEffect);
+	yield takeLatest(fetchDecisionMatrixRequest.type, fetchDecisionMatrixEffect);
+	yield takeLatest(fetchRunMetricsRequest.type, fetchRunMetricsEffect);
 }

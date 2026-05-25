@@ -38,7 +38,18 @@ def compute_metrics(nav_series: list[float]) -> dict:
         "profit_factor": float(profit_factor) if profit_factor is not None else None,
     }
     
-def compute_run_eod_metrics(nav_series: list[float], return_series: list[float]) -> dict[str, float | int | None]:
+def _max_consecutive_losses(pnls: list[float]) -> int:
+    max_streak = current = 0
+    for v in pnls:
+        if v < 0:
+            current += 1
+            max_streak = max(max_streak, current)
+        else:
+            current = 0
+    return max_streak
+
+
+def compute_run_eod_metrics(nav_series: list[float], return_series: list[float], trade_pnls: list[float] | None = None) -> dict[str, float | int | None]:
     if not nav_series:
         return {
             "cagr": None,
@@ -91,6 +102,8 @@ def compute_run_eod_metrics(nav_series: list[float], return_series: list[float])
         if gross_loss > 0:
             profit_factor = gross_profit / gross_loss
 
+    max_consecutive_losses = _max_consecutive_losses(trade_pnls) if trade_pnls else None
+
     return {
         "cagr": cagr,
         "volatility": volatility,
@@ -98,7 +111,8 @@ def compute_run_eod_metrics(nav_series: list[float], return_series: list[float])
         "max_drawdown": max_drawdown,
         "win_rate": win_rate,
         "profit_factor": profit_factor,
-        "n_trades": None,  # lo valorizzi a parte
+        "max_consecutive_losses": max_consecutive_losses,
+        "n_trades": None,
     }
 
 

@@ -37,21 +37,21 @@ def find_strike_by_delta(
         return abs(black_scholes_greeks(state).delta)
 
     if option_type == "put":
-        lo, hi = S * 0.50, S * 0.9999
+        lo, hi = S * 0.25, S * 0.9999
     elif option_type == "call":
-        lo, hi = S * 1.0001, S * 1.50
+        lo, hi = S * 1.0001, S * 3.00
     else:
         raise ValueError(f"option_type deve essere 'call' o 'put', ricevuto '{option_type}'")
 
     delta_lo = _abs_delta(lo)
     delta_hi = _abs_delta(hi)
 
-    if target_delta < min(delta_lo, delta_hi) or target_delta > max(delta_lo, delta_hi):
-        raise ValueError(
-            f"target_delta {target_delta:.3f} fuori dal range raggiungibile "
-            f"[{min(delta_lo, delta_hi):.3f}, {max(delta_lo, delta_hi):.3f}] "
-            f"per {option_type} con S={S}, IV={sigma:.2%}, DTE={T*365:.0f}"
-        )
+    # Con IV molto alta gli strike estremi non raggiungono il target_delta richiesto.
+    # In questo caso usiamo il delta più vicino raggiungibile nel range.
+    if target_delta < min(delta_lo, delta_hi):
+        target_delta = min(delta_lo, delta_hi) + 1e-4
+    elif target_delta > max(delta_lo, delta_hi):
+        target_delta = max(delta_lo, delta_hi) - 1e-4
 
     for _ in range(max_iter):
         mid = (lo + hi) / 2

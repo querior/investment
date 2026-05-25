@@ -25,6 +25,22 @@ _TABLES = [
     InstrumentConfig.__table__,
 ]
 
+_STRATEGY_SEED = [
+    {"type": "bull_put_spread",           "name": "Bull Put Spread",           "acronym": "BPS",     "color": "blue"},
+    {"type": "bear_call_spread",          "name": "Bear Call Spread",          "acronym": "BCS",     "color": "orange"},
+    {"type": "put_broken_wing_butterfly", "name": "Put Broken Wing Butterfly", "acronym": "Put BWB", "color": "lime"},
+    {"type": "bull_call_spread",          "name": "Bull Call Spread",          "acronym": "BuCS",    "color": "cyan"},
+    {"type": "bear_put_spread",           "name": "Bear Put Spread",           "acronym": "BePS",    "color": "purple"},
+    {"type": "long_straddle",             "name": "Long Straddle",             "acronym": "Std",     "color": "gold"},
+    {"type": "long_strangle",             "name": "Long Strangle",             "acronym": "Sng",     "color": "volcano"},
+    {"type": "iron_condor",               "name": "Iron Condor",               "acronym": "IC",      "color": "green"},
+    {"type": "iron_butterfly",            "name": "Iron Butterfly",            "acronym": "IB",      "color": "geekblue"},
+    {"type": "calendar_spread",           "name": "Calendar Spread",           "acronym": "Cal",     "color": "magenta"},
+    {"type": "jade_lizard",               "name": "Jade Lizard",               "acronym": "JL",      "color": "red"},
+    {"type": "reverse_jade_lizard",       "name": "Reverse Jade Lizard",       "acronym": "RJL",     "color": "pink"},
+    {"type": "diagonal_spread",           "name": "Diagonal Spread",           "acronym": "Diag",    "color": "default"},
+]
+
 _INSTRUMENT_SEED = [
     {
         "ticker": "IWM",
@@ -83,6 +99,18 @@ _INSTRUMENT_SEED = [
         "bid_ask_spread_pct": 0.005,
     },
 ]
+
+
+def _seed_strategies(conn) -> None:
+    for row in _STRATEGY_SEED:
+        conn.execute(text("""
+            INSERT INTO option_strategies (type, name, acronym, color)
+            VALUES (:type, :name, :acronym, :color)
+            ON CONFLICT (type) DO UPDATE
+                SET name    = EXCLUDED.name,
+                    acronym = EXCLUDED.acronym,
+                    color   = EXCLUDED.color
+        """), row)
 
 
 def _seed_instruments(conn) -> None:
@@ -186,4 +214,5 @@ def init_backtest_db(reset: bool = False) -> None:
                 ADD COLUMN IF NOT EXISTS entry_fair_value        FLOAT;
         """))
     with engine.begin() as conn:
+        _seed_strategies(conn)
         _seed_instruments(conn)

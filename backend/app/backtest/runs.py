@@ -32,7 +32,6 @@ from app.backtest.metrics import compute_metrics, compute_run_eod_metrics
 from .domain.models import Portfolio
 from app.backtest.data_preparation.base import prepare_market_df
 from app.backtest.data_preparation.pipeline import build_backtest_dataset
-from app.backtest.domain.strategy.selectors import select_strategy
 from app.backtest.domain.option.ev import compute_trade_ev
 from app.engines.option import DecisionEngine
 
@@ -152,14 +151,23 @@ def _build_position_config(params_dict: dict) -> dict:
     """
     Costruisce il config di position sizing dai BacktestRunParameter.
     Usato da DecisionEngine per il calcolo della size dei contratti.
+
+    debug.force_open: se "true", bypassa il threshold L5 e forza OPEN su ogni
+    candidato con builder valido. Usare solo per verificare la copertura della
+    matrice zona-strategia, non per backtest reali.
     """
     def _get(key: str, default: str) -> str:
         p = params_dict.get(key)
         return p["value"] if p else default
 
+    force_open = _get("debug.force_open", "false").lower() == "true"
+
     return {
         "size_multiplier": 1.0,
-        "available_risk": float(_get("max_risk", "0.03")),
+        "available_risk": float(_get("max_risk", "3")) / 100.0,
+        "decision_threshold_open": 0.0 if force_open else 75.0,
+        "decision_threshold_skip": 0.0 if force_open else 60.0,
+        "debug_force_open": force_open,
     }
 
 
@@ -409,6 +417,7 @@ def cleanup_eod_backtest_run(db: Session, run_id: int) -> None:
     run.win_rate = None
     run.profit_factor = None
     run.n_trades = None
+    run.max_consecutive_losses = None
     
     db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
     db.query(BacktestPositionSnapshot).filter(
@@ -422,7 +431,9 @@ def cleanup_eod_backtest_run(db: Session, run_id: int) -> None:
     db.query(BacktestPortfolioPerformance).filter(
         BacktestPortfolioPerformance.run_id == run_id
     ).delete()
-    
+
+    db.query(DecisionLog).filter(DecisionLog.run_id == run_id).delete()
+
     db.commit()
 
 def run_eod_backtest(
@@ -438,6 +449,7 @@ def run_eod_backtest(
     risk_config: dict | None = None,
     target_delta_short: float | None = None,
     target_delta_long: float | None = None,
+    target_delta_long_call: float = 0.10,
 ) -> None:
     if target_delta_short is None or target_delta_long is None:
         raise ValueError(
@@ -462,6 +474,7 @@ def run_eod_backtest(
 
         nav_series: list[float] = []
         return_series: list[float] = []
+        trade_pnls: list[float] = []
         prev_nav: float | None = None
         total_trades = 0
         recent_closes: dict[str, str] = {}  # Track strategy close dates for cooldown
@@ -516,6 +529,7 @@ def run_eod_backtest(
                 if position.is_open and should_exit:
                     exit_reason = exit_conditions.get("triggered_by") if exit_conditions else "unknown"
                     logger.warning(f"close position: {position.name} {position.opened_at} - reason: {exit_reason}")
+                    trade_pnls.append(position.pnl)
                     portfolio.close_position(position)
                     closed_positions_count += 1
                     # Track the close date for this strategy (cooldown)
@@ -535,196 +549,12 @@ def run_eod_backtest(
 
             portfolio.remove_closed_positions()
 
-            # 4. entry logic - only check when portfolio is empty
-            has_open_positions = len([p for p in portfolio.positions if p.is_open]) > 0
-
-            if not has_open_positions:
-                logger.warning(f"[ENTRY CHECK {date}] Portfolio empty, checking for entry. IV={iv:.2f}, IV_RANK={row.get('iv_rank', 'N/A')}, ADX={row.get('adx', 'N/A')}, RSI={row.get('rsi_14', 'N/A')}")
-
-                # Decision Engine L1-L5 pipeline
-                decision = engine.process_signal(
-                    row=row,
-                    entry_config=entry_config or {},
-                    position_config=position_config or {},
-                    risk_config=risk_config or {},
-                )
-
-                logger.warning(f"[L5 DECISION {date}] Action={decision.action.value}, Score={decision.score:.1f}, Reasoning={decision.reasoning}")
-
-                # Use strategy from decision engine
-                if decision.action.value == "OPEN" and decision.strategy_spec is None:
-                    logger.error(f"[L5 ERROR {date}] Action is OPEN but strategy_spec is None! Reasoning: {decision.reasoning}")
-                    continue
-
-                strategy = cast(Any, decision.strategy_spec)
-
-                # Log decision to database
-                iv_rank_val = row.get("iv_rank")
-                adx_val = row.get("adx")
-
-                # Extract strategy fields or use defaults if no strategy
-                strategy_name_log = strategy.name if strategy else "N/A"
-                size_multiplier_log = strategy.size_multiplier if strategy else 0.0
-                should_trade_log = strategy.should_trade if strategy else False
-
-                if strategy:
-                    logger.warning(f"[ENTRY RESULT {date}] Strategy={strategy_name_log}, should_trade={should_trade_log}, size_multiplier={size_multiplier_log:.0%}")
-                else:
-                    logger.warning(f"[ENTRY DECISION {date}] Action={decision.action.value}, no strategy (as expected)")
-
-                decision_log = DecisionLog(
-                    run_id=run.id,
-                    date=date,
-                    zone=str(row.get("zone", "")).replace("Zone.", "") if row.get("zone") else None,
-                    trend=str(row.get("trend_signal", "")).replace("Trend.", "") if row.get("trend_signal") else None,
-                    iv_rank=float(iv_rank_val) if iv_rank_val is not None else None,
-                    adx=float(adx_val) if adx_val is not None else None,
-                    entry_score=float(row.get("entry_score", 0)),
-                    strategy_name=strategy_name_log,
-                    size_multiplier=size_multiplier_log,
-                    should_trade=should_trade_log,
-                    spot=float(row.get("close", 0)),
-                    iv=float(row.get("iv", 0)),
-                    dte_days=int(row.get("dte_days", 45)),
-                    delta=None,
-                    gamma=None,
-                    vega=None,
-                    theta=None,
-                    bid_ask_spread=None,
-                    bid_ask_pct=None,
-                    edge=None,
-                    breakeven_distance=None,
-                    decision_action=decision.action.value,
-                    decision_score=decision.score,
-                    decision_reasoning=decision.reasoning,
-                )
-                db.add(decision_log)
-                db.commit()
-
-                # Skip entry logic if no strategy (SKIP/MONITOR decisions)
-                if not strategy:
-                    continue
-
-                # Check cooldown: strategy cannot reopen within cooldown_days
-                cooldown_days_param = entry_config.get("entry.cooldown_days") if entry_config else None
-                cooldown_days = int(cooldown_days_param["value"]) if cooldown_days_param else 5
-
-                in_cooldown = False
-                if strategy.name in recent_closes:
-                    days_since_close = (datetime.datetime.strptime(date, "%Y-%m-%d") -
-                                       datetime.datetime.strptime(recent_closes[strategy.name], "%Y-%m-%d")).days
-                    if days_since_close < cooldown_days:
-                        in_cooldown = True
-                        logger.warning(f"[ENTRY COOLDOWN {date}] Strategy {strategy.name} in cooldown ({days_since_close} days < {cooldown_days})")
-
-                # Open if DecisionEngine says OPEN and passes cooldown
-                should_open = (decision.action.value == "OPEN" and not in_cooldown) or (strategy.should_trade and strategy.size_multiplier > 0 and not in_cooldown)
-
-                if should_open:
-                    logger.warning(f"[ENTRY ACCEPT {date}] Opening position")
-                    q = instrument.dividend_yield if instrument else 0.0
-                    new_position = strategy.builder(
-                        date=date,
-                        S=S,
-                        iv=iv,
-                        dte_days=45,
-                        quantity=1,
-                        q=q,
-                        target_delta_short=target_delta_short,
-                        target_delta_long=target_delta_long,
-                    )
-
-                    # Apply size multiplier (quality-based sizing from entry score)
-                    if strategy.size_multiplier < 1.0:
-                        _scale_position(new_position, strategy.size_multiplier)
-
-                    # Calcolo EV pre-trade — filtra solo se ha edge netto
-                    trade_ev = None
-                    if instrument is not None:
-                        legs_for_ev = [
-                            {
-                                "strike": leg.state.K,
-                                "type": leg.state.option_type,
-                                "position": "short" if leg.sign == -1 else "long",
-                                "qty": leg.quantity,
-                            }
-                            for leg in new_position.legs
-                        ]
-                        trade_ev = compute_trade_ev(
-                            legs=legs_for_ev,
-                            S=S,
-                            T=45 / 365.0,
-                            r=0.03,
-                            sigma=iv,
-                            instrument=instrument,
-                        )
-                        if not trade_ev.is_credit:
-                            logger.warning(f"Skip position (debit trade): net_premium={trade_ev.net_premium:.2f}")
-                            continue
-
-                    logger.warning(f"open position: {new_position.name} {new_position.opened_at}")
-                    portfolio.open_position(new_position)
-                    new_positions_count += 1
-
-                    # Converti position_type in snake_case per FK a option_strategies
-                    position_type_key = new_position.name.lower().replace(" ", "_")
-
-                    # Capture entry conditions from row
-                    ema_20 = row.get("ema_20")
-                    sma_50 = row.get("sma_50")
-                    trend = "UP" if (ema_20 is not None and sma_50 is not None and ema_20 > sma_50) else "DOWN"
-
-                    entry_conditions = {
-                        "underlying_price": S,
-                        "iv": float(iv),
-                        "iv_rv_ratio": float(row.get("iv_rv_ratio", 0)),
-                        "rsi_14": float(row.get("rsi_14", 0)) if row.get("rsi_14") is not None else None,
-                        "macd": float(row.get("macd", 0)) if row.get("macd") is not None else None,
-                        "sma_20": float(row.get("sma_20", 0)) if row.get("sma_20") is not None else None,
-                        "sma_50": float(row.get("sma_50", 0)) if row.get("sma_50") is not None else None,
-                        "ema_20": float(row.get("ema_20", 0)) if row.get("ema_20") is not None else None,
-                        "trend": trend,
-                        "macro_regime": row.get("macro_regime"),
-                        "macro_score": float(row.get("macro_score", 0)) if row.get("macro_score") is not None else None,
-                        "rv_20": float(row.get("rv_20", 0)) if row.get("rv_20") is not None else None,
-                    }
-
-                    # Capture exit conditions rules - use actual exit_config from run parameters
-                    exit_conditions = exit_config.copy() if exit_config else {}
-
-                    db_position = BacktestPosition(
-                        run_id=run.id,
-                        position_type=position_type_key,
-                        status="OPEN",
-                        opened_at=date,
-                        entry_underlying=S,
-                        entry_iv=iv,
-                        entry_macro_regime=row.get("macro_regime"),
-                        initial_value=new_position.initial_value,
-                        entry_conditions=entry_conditions,
-                        exit_conditions=exit_conditions,
-                        entry_fair_value=trade_ev.fair_value if trade_ev else None,
-                        entry_ev_gross=trade_ev.expected_value_gross if trade_ev else None,
-                        entry_ev_net=trade_ev.expected_value_net if trade_ev else None,
-                        entry_prob_profit=trade_ev.prob_profit if trade_ev else None,
-                        entry_transaction_costs=trade_ev.transaction_costs if trade_ev else None,
-                    )
-                    db.add(db_position)
-                    db.flush() # serve per ottenere db_position.id
-
-                    position_ids[id(new_position)] = db_position.id
-                    total_trades += 1
-                    db.commit()
-                else:
-                    reason = "should_trade=False" if not strategy.should_trade else "size_multiplier=0"
-                    logger.warning(f"[ENTRY REJECT {date}] {reason}")
-            else:
-                logger.warning(f"[ENTRY SKIP {date}] Portfolio has open positions, skipping entry check")
-
-            # # 5. salva performance portfolio
+            # 4. record portfolio NAV/performance — after closes, before new opens
             positions_value = portfolio.positions_value()
             total_equity = portfolio.total_equity
-            
+
+            period_return = 0.0 if prev_nav in (None, 0) else (total_equity / prev_nav) - 1.0
+
             perf = BacktestPortfolioPerformance(
                 run_id=run.id,
                 snapshot_date=date,
@@ -745,30 +575,269 @@ def run_eod_backtest(
                 iv=iv,
             )
             db.add(perf)
-            
-            period_return = 0.0 if prev_nav in (None, 0) else (total_equity / prev_nav) - 1.0
 
             perf_summary = BacktestPerformance(
                 run_id=run.id,
                 date=date,
                 nav=total_equity,
-                period_return=period_return,  
+                period_return=period_return,
             )
             db.add(perf_summary)
 
             nav_series.append(total_equity)
             return_series.append(period_return)
             prev_nav = total_equity
+            db.commit()
+
+            # flush running metrics every 30 steps so the polling endpoint returns live data
+            if len(nav_series) % 30 == 0 and len(nav_series) >= 5:
+                interim = compute_run_eod_metrics(nav_series, return_series, trade_pnls=trade_pnls)
+                run.cagr = interim.get("cagr")
+                run.volatility = interim.get("volatility")
+                run.sharpe = interim.get("sharpe")
+                run.max_drawdown = interim.get("max_drawdown")
+                run.win_rate = interim.get("win_rate")
+                run.profit_factor = interim.get("profit_factor")
+                mcl = interim.get("max_consecutive_losses")
+                run.max_consecutive_losses = int(mcl) if mcl is not None else None
+                run.n_trades = total_trades
+                db.commit()
+
+            # 5. entry logic - only check when portfolio is empty
+            has_open_positions = len([p for p in portfolio.positions if p.is_open]) > 0
+
+            if not has_open_positions:
+                logger.warning(f"[ENTRY CHECK {date}] Portfolio empty, checking for entry. IV={iv:.2f}, IV_RANK={row.get('iv_rank', 'N/A')}, ADX={row.get('adx', 'N/A')}, RSI={row.get('rsi_14', 'N/A')}")
+
+                # Decision Engine L1-L5 pipeline
+                decision = engine.process_signal(
+                    row=row,
+                    entry_config=entry_config or {},
+                    position_config=position_config or {},
+                    risk_config=risk_config or {},
+                )
+
+                logger.warning(f"[L5 DECISION {date}] Action={decision.action.value}, Score={decision.score:.1f}, Reasoning={decision.reasoning}")
+
+                if decision.action.value == "OPEN" and decision.strategy_spec is None:
+                    logger.error(f"[L5 ERROR {date}] Action is OPEN but strategy_spec is None! Reasoning: {decision.reasoning}")
+                    continue
+
+                strategy = cast(Any, decision.strategy_spec)
+
+                iv_rank_val = row.get("iv_rank")
+                adx_val = row.get("adx")
+                strategy_name_log = strategy.name if strategy else "N/A"
+                size_multiplier_log = strategy.size_multiplier if strategy else 0.0
+
+                if strategy:
+                    logger.warning(f"[ENTRY RESULT {date}] Strategy={strategy_name_log}, size_multiplier={size_multiplier_log:.0%}")
+                else:
+                    logger.warning(f"[ENTRY DECISION {date}] Action={decision.action.value}, no strategy (as expected)")
+
+                ev = decision.evaluation
+                trend_raw = row.get("trend_signal")
+                trend_log = str(int(trend_raw)) if trend_raw is not None else None
+
+                decision_log = DecisionLog(
+                    run_id=run.id,
+                    date=date,
+                    zone=decision.zone,
+                    trend=trend_log,
+                    iv_rank=float(iv_rank_val) if iv_rank_val is not None else None,
+                    adx=float(adx_val) if adx_val is not None else None,
+                    entry_score=float(row.get("entry_score", 50.0)),
+                    strategy_name=strategy_name_log,
+                    size_multiplier=size_multiplier_log,
+                    should_trade=True,
+                    spot=float(row.get("close", 0)),
+                    iv=float(row.get("iv", 0)),
+                    dte_days=int(row.get("dte_days", 45)),
+                    delta=None,
+                    gamma=None,
+                    vega=None,
+                    theta=None,
+                    bid_ask_spread=None,
+                    bid_ask_pct=None,
+                    edge=None,
+                    breakeven_distance=None,
+                    edge_source=decision.edge_source,
+                    decision_action=decision.action.value,
+                    decision_score=decision.score,
+                    decision_reasoning=decision.reasoning,
+                    pricing_edge_score=ev.pricing_edge_score if ev else None,
+                    risk_reward_score=ev.risk_reward_score if ev else None,
+                    breakeven_score=ev.breakeven_score if ev else None,
+                    execution_cost_score=ev.execution_cost_score if ev else None,
+                    capital_efficiency_score=ev.capital_efficiency_score if ev else None,
+                )
+                db.add(decision_log)
+                db.commit()
+
+                if not strategy:
+                    continue
+
+                # Check cooldown: strategy cannot reopen within cooldown_days
+                cooldown_days_param = entry_config.get("entry.cooldown_days") if entry_config else None
+                cooldown_days = int(cooldown_days_param["value"]) if cooldown_days_param else 5
+
+                in_cooldown = False
+                if strategy.name in recent_closes:
+                    days_since_close = (datetime.datetime.strptime(date, "%Y-%m-%d") -
+                                       datetime.datetime.strptime(recent_closes[strategy.name], "%Y-%m-%d")).days
+                    if days_since_close < cooldown_days:
+                        in_cooldown = True
+                        logger.warning(f"[ENTRY COOLDOWN {date}] Strategy {strategy.name} in cooldown ({days_since_close} days < {cooldown_days})")
+
+                should_open = decision.action.value == "OPEN" and not in_cooldown
+
+                if should_open:
+                    logger.warning(f"[ENTRY ACCEPT {date}] Opening position")
+                    q = instrument.dividend_yield if instrument else 0.0
+                    new_position = strategy.builder(
+                        date=date,
+                        S=S,
+                        iv=iv,
+                        dte_days=45,
+                        quantity=1,
+                        q=q,
+                        target_delta_short=target_delta_short,
+                        target_delta_long=target_delta_long,
+                        target_delta_long_call=target_delta_long_call,
+                    )
+
+                    # Compute EV with qty=1 to get per-contract max_loss for risk check
+                    trade_ev = None
+                    if instrument is not None:
+                        legs_for_ev_1c = [
+                            {
+                                "strike": leg.state.K,
+                                "type": leg.state.option_type,
+                                "position": "short" if leg.sign == -1 else "long",
+                                "qty": leg.quantity,
+                            }
+                            for leg in new_position.legs
+                        ]
+                        trade_ev = compute_trade_ev(
+                            legs=legs_for_ev_1c,
+                            S=S,
+                            T=45 / 365.0,
+                            r=0.03,
+                            sigma=iv,
+                            instrument=instrument,
+                        )
+
+                    # Risk-based sizing: Option B — block if even 1 contract exceeds budget
+                    max_risk_pct = (position_config or {}).get("available_risk", 0.03)
+                    budget = portfolio.cash * max_risk_pct
+                    max_loss_1c = trade_ev.max_loss if trade_ev else None
+
+                    if max_loss_1c is not None and max_loss_1c > 0 and budget > 0:
+                        if max_loss_1c > budget:
+                            logger.warning(
+                                f"[RISK_REJECT {date}] max_loss={max_loss_1c:.2f} > budget={budget:.2f} "
+                                f"(cash={portfolio.cash:.2f} × max_risk={max_risk_pct:.1%})"
+                            )
+                            decision_log.decision_action = "RISK_REJECT"
+                            decision_log.decision_reasoning = (
+                                f"RISK_REJECT: max_loss per contratto ({max_loss_1c:.2f}) > "
+                                f"budget ({budget:.2f} = {portfolio.cash:.2f} × {max_risk_pct:.1%})"
+                            )
+                            db.commit()
+                            continue
+
+                        n_contracts = max(1, int(budget / max_loss_1c))
+                        n_contracts = max(1, int(n_contracts * strategy.size_multiplier))
+                        for leg in new_position.legs:
+                            leg.quantity = n_contracts
+
+                        # Recompute EV with final contract count
+                        if instrument is not None:
+                            legs_for_ev = [
+                                {
+                                    "strike": leg.state.K,
+                                    "type": leg.state.option_type,
+                                    "position": "short" if leg.sign == -1 else "long",
+                                    "qty": leg.quantity,
+                                }
+                                for leg in new_position.legs
+                            ]
+                            trade_ev = compute_trade_ev(
+                                legs=legs_for_ev,
+                                S=S,
+                                T=45 / 365.0,
+                                r=0.03,
+                                sigma=iv,
+                                instrument=instrument,
+                            )
+
+                    logger.warning(f"open position: {new_position.name} {new_position.opened_at}")
+                    portfolio.open_position(new_position)
+
+                    position_type_key = new_position.name.lower().replace(" ", "_")
+
+                    ema_20 = row.get("ema_20")
+                    sma_50 = row.get("sma_50")
+                    trend = "UP" if (ema_20 is not None and sma_50 is not None and ema_20 > sma_50) else "DOWN"
+
+                    entry_conditions = {
+                        "underlying_price": S,
+                        "iv": float(iv),
+                        "iv_rv_ratio": float(row.get("iv_rv_ratio", 0)),
+                        "rsi_14": float(row.get("rsi_14", 0)) if row.get("rsi_14") is not None else None,
+                        "macd": float(row.get("macd", 0)) if row.get("macd") is not None else None,
+                        "sma_20": float(row.get("sma_20", 0)) if row.get("sma_20") is not None else None,
+                        "sma_50": float(row.get("sma_50", 0)) if row.get("sma_50") is not None else None,
+                        "ema_20": float(row.get("ema_20", 0)) if row.get("ema_20") is not None else None,
+                        "trend": trend,
+                        "macro_regime": row.get("macro_regime"),
+                        "macro_score": float(row.get("macro_score", 0)) if row.get("macro_score") is not None else None,
+                        "rv_20": float(row.get("rv_20", 0)) if row.get("rv_20") is not None else None,
+                    }
+
+                    exit_conditions_entry = exit_config.copy() if exit_config else {}
+
+                    db_position = BacktestPosition(
+                        run_id=run.id,
+                        position_type=position_type_key,
+                        status="OPEN",
+                        opened_at=date,
+                        entry_underlying=S,
+                        entry_iv=iv,
+                        entry_macro_regime=row.get("macro_regime"),
+                        initial_value=new_position.initial_value,
+                        entry_conditions=entry_conditions,
+                        exit_conditions=exit_conditions_entry,
+                        entry_fair_value=trade_ev.fair_value if trade_ev else None,
+                        entry_ev_gross=trade_ev.expected_value_gross if trade_ev else None,
+                        entry_ev_net=trade_ev.expected_value_net if trade_ev else None,
+                        entry_prob_profit=trade_ev.prob_profit if trade_ev else None,
+                        entry_transaction_costs=trade_ev.transaction_costs if trade_ev else None,
+                        entry_max_loss=trade_ev.max_loss if trade_ev else None,
+                        entry_max_profit=trade_ev.max_profit if trade_ev else None,
+                    )
+                    db.add(db_position)
+                    db.flush()
+
+                    position_ids[id(new_position)] = db_position.id
+                    total_trades += 1
+                    db.commit()
+                else:
+                    logger.warning(f"[ENTRY REJECT {date}] decision={decision.action.value}, cooldown={in_cooldown}")
+            else:
+                logger.warning(f"[ENTRY SKIP {date}] Portfolio has open positions, skipping entry check")
 
         # successo
-        metrics = compute_run_eod_metrics(nav_series, return_series)
-        
+        metrics = compute_run_eod_metrics(nav_series, return_series, trade_pnls=trade_pnls)
+
         run.cagr = metrics["cagr"]
         run.volatility = metrics["volatility"]
         run.sharpe = metrics["sharpe"]
         run.max_drawdown = metrics["max_drawdown"]
         run.win_rate = metrics["win_rate"]
         run.profit_factor = metrics["profit_factor"]
+        mcl = metrics.get("max_consecutive_losses")
+        run.max_consecutive_losses = int(mcl) if mcl is not None else None
         run.n_trades = total_trades
         run.status = BacktestStatus.DONE
         run.error_message = None
@@ -803,8 +872,11 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
     df = prepare_market_df(db, run)
     logger.warning(f"[RUN {run.id}] Market data loaded: {len(df)} rows")
 
+    logger.warning(f"[RUN {run.id}] Building entry config (needed for entry_score in pipeline)")
+    entry_config = _build_entry_config(params_dict)
+
     logger.warning(f"[RUN {run.id}] Building backtest dataset (with all indicators)")
-    df = build_backtest_dataset(df, db, params_dict, run)
+    df = build_backtest_dataset(df, db, params_dict, run, entry_config=entry_config)
     logger.warning(f"[RUN {run.id}] Dataset built: {len(df)} rows, columns: {list(df.columns)[:10]}...")
 
     logger.warning(f"[RUN {run.id}] Dataset preview: {df.head()}")
@@ -827,8 +899,7 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
     logger.warning(f"[RUN {run.id}] Instrument loaded: {instrument}")
     logger.warning(f"[RUN {run.id}] Building exit config")
     exit_config = _build_exit_config(params_dict)
-    logger.warning(f"[RUN {run.id}] Building entry config")
-    entry_config = _build_entry_config(params_dict)
+    # entry_config already built above (before build_backtest_dataset, needed for entry_score column)
     logger.warning(f"[RUN {run.id}] Building position config")
     position_config = _build_position_config(params_dict)
     logger.warning(f"[RUN {run.id}] Building risk config (Decision Layer)")
@@ -849,7 +920,9 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
         )
     target_delta_short = float(delta_short_param["value"])
     target_delta_long = float(delta_long_param["value"])
-    logger.warning(f"[RUN {run.id}] Target deltas: short={target_delta_short}, long={target_delta_long}")
+    delta_long_call_param = params_dict.get("entry.target_delta_long_call")
+    target_delta_long_call = float(delta_long_call_param["value"]) if delta_long_call_param else 0.10
+    logger.warning(f"[RUN {run.id}] Target deltas: short={target_delta_short}, long={target_delta_long}, long_call={target_delta_long_call}")
 
     logger.warning(f"[RUN {run.id}] Starting EOD backtest execution with {len(df)} data points")
     run_eod_backtest(
@@ -865,6 +938,7 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
         risk_config=risk_config,
         target_delta_short=target_delta_short,
         target_delta_long=target_delta_long,
+        target_delta_long_call=target_delta_long_call,
     )
     logger.warning(f"[RUN {run.id}] EOD backtest execution completed")
 

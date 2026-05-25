@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 from datetime import date as date_type
+from collections import defaultdict
+from sqlalchemy import String, func
+from sqlalchemy import cast as sa_cast
+from app.backtest.metrics import compute_ev_accuracy
 from sqlalchemy.orm import Session, selectinload
 from threading import Thread
 from typing import cast, Optional, List
@@ -21,7 +25,6 @@ from app.backtest.schemas.backtest_run_parameter import BacktestRunParameter
 from app.db.allocation_history import AllocationHistory
 from app.db.decision_log import DecisionLog
 from app.backtest.parameter_schema import validate_parameters, PARAMETER_SCHEMA
-from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
@@ -477,7 +480,11 @@ def invalidate_run(backtest_id: int, run_id: int, db: Session = Depends(get_db))
     db.query(BacktestWeight).filter(BacktestWeight.run_id == run_id).delete()
     db.query(BacktestPerformance).filter(BacktestPerformance.run_id == run_id).delete()
     db.query(AllocationHistory).filter(AllocationHistory.run_id == run_id).delete()
-    
+    db.query(BacktestPositionSnapshot).filter(BacktestPositionSnapshot.run_id == run_id).delete()
+    db.query(BacktestPosition).filter(BacktestPosition.run_id == run_id).delete()
+    db.query(BacktestPortfolioPerformance).filter(BacktestPortfolioPerformance.run_id == run_id).delete()
+    db.query(DecisionLog).filter(DecisionLog.run_id == run_id).delete()
+
     for field in ("cagr", "volatility", "sharpe", "max_drawdown", "win_rate", "profit_factor", "n_trades", "config_snapshot", "error_message"):
         setattr(run, field, None)
     setattr(run, "status", BacktestStatus.READY)
@@ -521,6 +528,7 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         "win_rate": run.win_rate,
         "profit_factor": run.profit_factor,
         "n_trades": run.n_trades,
+        "max_consecutive_losses": run.max_consecutive_losses,
     }
 
     # Performance breakdown by strategy
@@ -617,6 +625,26 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         for r in nav_rows
     ]
 
+    # Fetch portfolio timeseries for charts (underlying, IV, P&L attribution)
+    portfolio_rows = (
+        db.query(BacktestPortfolioPerformance)
+        .filter(BacktestPortfolioPerformance.run_id == run_id)
+        .order_by(BacktestPortfolioPerformance.snapshot_date)
+        .all()
+    )
+    portfolio_timeseries = [
+        {
+            "snapshot_date": r.snapshot_date,
+            "total_equity": float(r.total_equity),
+            "realized_pnl": float(r.realized_pnl),
+            "unrealized_pnl": float(r.unrealized_pnl),
+            "total_pnl": float(r.total_pnl),
+            "underlying_price": float(r.underlying_price),
+            "iv": float(r.iv),
+        }
+        for r in portfolio_rows
+    ]
+
     return {
         "run_id": run_id,
         "start_date": run.start_date,
@@ -626,27 +654,60 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         "exit_rules": exit_rules,
         "performances": performances,
         "nav": nav,
+        "portfolio_timeseries": portfolio_timeseries,
     }
 
 
 @router.get("/backtests/{backtest_id}/runs/{run_id}/ev-accuracy")
 def run_ev_accuracy(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
-    from app.backtest.metrics import compute_ev_accuracy
     _get_run_or_404(backtest_id, run_id, db)
     return compute_ev_accuracy(db, run_id)
 
 
-@router.get("/backtests/{backtest_id}/runs/{run_id}/performance")
-def run_performance(backtest_id: int, run_id: int, page: int = 1, limit: int = 20, db: Session = Depends(get_db)):
+@router.get("/backtests/{backtest_id}/runs/{run_id}/positions/filter-options")
+def positions_filter_options(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
+    """Valori distinti di strategia e regime per i filtri della tabella posizioni."""
     _get_run_or_404(backtest_id, run_id, db)
-    total = (
-        db.query(BacktestPosition)
+    rows = (
+        db.query(BacktestPosition.position_type, BacktestPosition.entry_macro_regime)
         .filter(BacktestPosition.run_id == run_id)
-        .count()
+        .distinct()
+        .all()
     )
+    strategies = sorted({r.position_type for r in rows if r.position_type})
+    regimes = sorted({r.entry_macro_regime for r in rows if r.entry_macro_regime})
+    return {"strategies": strategies, "regimes": regimes}
+
+
+@router.get("/backtests/{backtest_id}/runs/{run_id}/performance")
+def run_performance(
+    backtest_id: int,
+    run_id: int,
+    page: int = 1,
+    limit: int = 20,
+    strategy: Optional[str] = None,
+    macro_regime: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _get_run_or_404(backtest_id, run_id, db)
+
+    run_params = {
+        p.key: p.value
+        for p in db.query(BacktestRunParameter).filter(BacktestRunParameter.run_id == run_id).all()
+    }
+    initial_capital = float(run_params.get("initial_capital", 10000))
+    max_risk_pct = float(run_params.get("max_risk", 3)) / 100.0
+
+    base_filter = [BacktestPosition.run_id == run_id]
+    if strategy:
+        base_filter.append(BacktestPosition.position_type == strategy)
+    if macro_regime:
+        base_filter.append(BacktestPosition.entry_macro_regime == macro_regime)
+
+    total = db.query(BacktestPosition).filter(*base_filter).count()
     positions = (
         db.query(BacktestPosition)
-        .filter(BacktestPosition.run_id == run_id)
+        .filter(*base_filter)
         .options(selectinload(BacktestPosition.strategy))
         .order_by(BacktestPosition.opened_at.desc())
         .offset((page - 1) * limit)
@@ -687,6 +748,12 @@ def run_performance(backtest_id: int, run_id: int, page: int = 1, limit: int = 2
             if last_snapshot:
                 unrealized_pnl = last_snapshot.position_pnl
 
+        capital_at_risk_pct = None
+        risk_limit_ok = None
+        if pos.entry_max_loss is not None and initial_capital > 0:
+            capital_at_risk_pct = pos.entry_max_loss / initial_capital
+            risk_limit_ok = capital_at_risk_pct <= max_risk_pct
+
         items.append({
             "id": pos.id,
             "position_type": pos.position_type,
@@ -705,6 +772,12 @@ def run_performance(backtest_id: int, run_id: int, page: int = 1, limit: int = 2
             "unrealized_pnl": unrealized_pnl,
             "performance_pct": performance_pct,
             "days_in_trade": days_in_trade,
+            "entry_max_loss": pos.entry_max_loss,
+            "entry_max_profit": pos.entry_max_profit,
+            "entry_prob_profit": pos.entry_prob_profit,
+            "entry_ev_net": pos.entry_ev_net,
+            "capital_at_risk_pct": capital_at_risk_pct,
+            "risk_limit_ok": risk_limit_ok,
         })
 
     # Calculate summary metrics (same as /metrics)
@@ -718,6 +791,7 @@ def run_performance(backtest_id: int, run_id: int, page: int = 1, limit: int = 2
         "win_rate": run.win_rate,
         "profit_factor": run.profit_factor,
         "n_trades": run.n_trades,
+        "max_consecutive_losses": run.max_consecutive_losses,
     }
 
     # Get all positions for performance calculation
@@ -1051,7 +1125,123 @@ def get_decision_logs(
                 "decision_action": log.decision_action,
                 "decision_score": log.decision_score,
                 "decision_reasoning": log.decision_reasoning,
+                "pricing_edge_score": log.pricing_edge_score,
+                "risk_reward_score": log.risk_reward_score,
+                "breakeven_score": log.breakeven_score,
+                "execution_cost_score": log.execution_cost_score,
+                "capital_efficiency_score": log.capital_efficiency_score,
             }
             for log in logs
         ]
+    }
+
+
+@router.get("/backtests/{backtest_id}/runs/{run_id}/decision_matrix")
+def get_decision_matrix(
+    backtest_id: int,
+    run_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Aggregated decision matrix: zone × strategy × decision → counts + avg sub-scores.
+    Used by the frontend regime matrix visualization.
+    """
+    _get_backtest_or_404(backtest_id, db)
+    _get_run_or_404(backtest_id, run_id, db)
+
+    rows = (
+        db.query(
+            DecisionLog.zone,
+            DecisionLog.strategy_name,
+            DecisionLog.decision_action,
+            func.count().label("count"),
+            func.avg(DecisionLog.decision_score).label("avg_score"),
+            func.avg(DecisionLog.entry_score).label("avg_entry_score"),
+            func.avg(DecisionLog.iv_rank).label("avg_iv_rank"),
+            func.avg(DecisionLog.adx).label("avg_adx"),
+            func.avg(DecisionLog.pricing_edge_score).label("avg_pricing_edge"),
+            func.avg(DecisionLog.risk_reward_score).label("avg_risk_reward"),
+            func.avg(DecisionLog.breakeven_score).label("avg_breakeven"),
+            func.avg(DecisionLog.execution_cost_score).label("avg_execution_cost"),
+            func.avg(DecisionLog.capital_efficiency_score).label("avg_capital_efficiency"),
+        )
+        .filter(DecisionLog.run_id == run_id)
+        .group_by(DecisionLog.zone, DecisionLog.strategy_name, DecisionLog.decision_action)
+        .order_by(DecisionLog.zone, DecisionLog.strategy_name, DecisionLog.decision_action)
+        .all()
+    )
+
+    def _f(v) -> float | None:
+        return round(float(v), 1) if v is not None else None
+
+    # Per-zone performance stats: join positions → decision_log on (run_id, strategy, date)
+    pos_rows = (
+        db.query(
+            DecisionLog.zone,
+            BacktestPosition.realized_pnl,
+            BacktestPosition.opened_at,
+        )
+        .join(
+            BacktestPosition,
+            (BacktestPosition.run_id == DecisionLog.run_id)
+            & (BacktestPosition.position_type == DecisionLog.strategy_name)
+            & (sa_cast(BacktestPosition.opened_at, String) == DecisionLog.date),
+        )
+        .filter(
+            DecisionLog.run_id == run_id,
+            DecisionLog.decision_action == "OPEN",
+            BacktestPosition.status == "CLOSED",
+            BacktestPosition.realized_pnl.isnot(None),
+        )
+        .order_by(DecisionLog.zone, BacktestPosition.opened_at)
+        .all()
+    )
+
+    zone_pnls: dict[str, list[float]] = defaultdict(list)
+    for pr in pos_rows:
+        zone_pnls[pr.zone or "UNKNOWN"].append(float(pr.realized_pnl))
+
+    def _zone_stats(pnls: list[float]) -> dict:
+        if not pnls:
+            return {}
+        wins = sum(1 for p in pnls if p > 0)
+        avg_pnl = sum(pnls) / len(pnls)
+        cum, peak, max_dd = 0.0, 0.0, 0.0
+        for p in pnls:
+            cum += p
+            if cum > peak:
+                peak = cum
+            dd = peak - cum
+            if dd > max_dd:
+                max_dd = dd
+        return {
+            "n_closed": len(pnls),
+            "win_rate": round(wins / len(pnls) * 100, 1),
+            "avg_pnl": round(avg_pnl, 2),
+            "max_drawdown": round(max_dd, 2),
+        }
+
+    zone_stats = {zone: _zone_stats(pnls) for zone, pnls in zone_pnls.items()}
+
+    return {
+        "run_id": run_id,
+        "rows": [
+            {
+                "zone": r.zone,
+                "strategy_name": r.strategy_name,
+                "decision_action": r.decision_action,
+                "count": r.count,
+                "avg_score": _f(r.avg_score),
+                "avg_entry_score": _f(r.avg_entry_score),
+                "avg_iv_rank": _f(r.avg_iv_rank),
+                "avg_adx": _f(r.avg_adx),
+                "avg_pricing_edge": _f(r.avg_pricing_edge),
+                "avg_risk_reward": _f(r.avg_risk_reward),
+                "avg_breakeven": _f(r.avg_breakeven),
+                "avg_execution_cost": _f(r.avg_execution_cost),
+                "avg_capital_efficiency": _f(r.avg_capital_efficiency),
+            }
+            for r in rows
+        ],
+        "zone_stats": zone_stats,
     }

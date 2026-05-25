@@ -52,6 +52,7 @@ class BacktestRun(Base):
     max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
     win_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     profit_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_consecutive_losses: Mapped[int | None] = mapped_column(Integer, nullable=True)
     n_trades: Mapped[int | None] = mapped_column(Integer, nullable=True)
     
     positions: Mapped[list["BacktestPosition"]] = relationship(

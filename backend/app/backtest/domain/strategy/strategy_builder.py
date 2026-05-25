@@ -15,6 +15,7 @@ def create_bull_put_spread(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
@@ -45,11 +46,13 @@ def create_bear_call_spread(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    target_delta_long_call: float = 0.10,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
     short_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_short, "call")
-    long_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_long, "call")
+    long_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_long_call, "call")
 
     short_call = OptionLeg(
         sign=-1,
@@ -75,6 +78,7 @@ def create_put_broken_wing_butterfly(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     """
     Put broken wing butterfly: long put OTM basso, 2x short put mid, long put ATM alto.
@@ -126,11 +130,13 @@ def create_bull_call_spread(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    target_delta_long_call: float = 0.10,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
-    long_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_long, "call")
-    short_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_short, "call")
+    long_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_short, "call")
+    short_strike = find_strike_by_delta(S, T, r, q, iv, target_delta_long_call, "call")
 
     long_call = OptionLeg(
         sign=+1,
@@ -156,6 +162,7 @@ def create_bear_put_spread(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
@@ -187,6 +194,7 @@ def create_long_straddle(
     r: float = 0.03,
     quantity: int = 1,
     q: float = 0.0,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
     atm_strike = round(S, 2)
@@ -214,6 +222,7 @@ def create_long_strangle(
     quantity: int = 1,
     q: float = 0.0,
     target_delta: float = 0.25,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
@@ -247,6 +256,7 @@ def create_iron_condor(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
@@ -293,6 +303,7 @@ def create_iron_butterfly(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
     atm_strike = round(S, 2)
@@ -342,6 +353,7 @@ def create_calendar_spread(
     dte_days_near: int = 30,
     dte_days_far: int = 60,
     target_delta_short: float = 0.50,
+    **kwargs,
 ) -> Position:
     T_near = dte_days_near / 365.0
     T_far = dte_days_far / 365.0
@@ -371,6 +383,7 @@ def create_jade_lizard(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
@@ -407,6 +420,7 @@ def create_reverse_jade_lizard(
     q: float = 0.0,
     target_delta_short: float = 0.16,
     target_delta_long: float = 0.05,
+    **kwargs,
 ) -> Position:
     T = dte_days / 365.0
 
@@ -449,6 +463,7 @@ def create_diagonal_spread(
     dte_days_far: int = 60,
     target_delta_short: float = 0.50,
     target_delta_long: float = 0.25,
+    **kwargs,
 ) -> Position:
     T_near = dte_days_near / 365.0
     T_far = dte_days_far / 365.0

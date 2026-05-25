@@ -115,7 +115,21 @@ export const getRunApi = async (
 		exit_rules: metricsRes.data.exit_rules,
 		performances: metricsRes.data.performances,
 		nav: metricsRes.data.nav,
+		portfolio_timeseries: metricsRes.data.portfolio_timeseries,
 	};
+};
+
+export const getRunMetricsApi = async (
+	backtestId: number,
+	runId: number
+): Promise<{
+	summary: any;
+	nav: any[];
+	portfolio_timeseries: any[];
+	performances: any[];
+}> => {
+	const res = await api.get(`/backtests/${backtestId}/runs/${runId}/metrics`);
+	return res.data;
 };
 
 export const getRunStatusApi = async (
@@ -159,7 +173,9 @@ export const getPerformanceApi = async (
 	backtestId: number,
 	runId: number,
 	page = 1,
-	limit = 20
+	limit = 20,
+	strategy?: string,
+	macro_regime?: string,
 ): Promise<{
 	items: BacktestPositionDto[];
 	total: number;
@@ -171,7 +187,17 @@ export const getPerformanceApi = async (
 }> => {
 	const res = await api.get(
 		`/backtests/${backtestId}/runs/${runId}/performance`,
-		{ params: { page, limit } }
+		{ params: { page, limit, strategy, macro_regime } }
+	);
+	return res.data;
+};
+
+export const getPositionFilterOptionsApi = async (
+	backtestId: number,
+	runId: number,
+): Promise<{ strategies: string[]; regimes: string[] }> => {
+	const res = await api.get(
+		`/backtests/${backtestId}/runs/${runId}/positions/filter-options`
 	);
 	return res.data;
 };
@@ -183,6 +209,16 @@ export const getPositionHistoryApi = async (
 ): Promise<BacktestPositionHistoryDto[]> => {
 	const res = await api.get(
 		`/backtests/${backtestId}/runs/${runId}/positions/${positionId}/history`
+	);
+	return res.data;
+};
+
+export const getDecisionMatrixApi = async (
+	backtestId: number,
+	runId: number
+): Promise<{ run_id: number; rows: any[] }> => {
+	const res = await api.get(
+		`/backtests/${backtestId}/runs/${runId}/decision_matrix`
 	);
 	return res.data;
 };

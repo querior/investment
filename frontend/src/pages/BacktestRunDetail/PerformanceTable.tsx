@@ -1,6 +1,7 @@
 import { Table, Card, Tag } from "antd";
 import { StrategyPerformance } from "../../features/backtest/types";
 import { fmt } from "../../utils/string";
+import { getStrategyMeta } from "../../utils/strategy";
 
 interface PerformanceTableProps {
 	performances: StrategyPerformance[] | undefined;
@@ -16,12 +17,16 @@ const PerformanceTable = ({ performances }: PerformanceTableProps) => {
 			title: "Strategy",
 			key: "strategy",
 			width: 150,
-			render: (_: unknown, row: StrategyPerformance) =>
-				row.strategy_acronym ? (
-					<Tag color={row.strategy_color}>{row.strategy_acronym}</Tag>
-				) : (
-					<span className="text-gray-500">{row.strategy}</span>
-				),
+			render: (_: unknown, row: StrategyPerformance) => {
+				const acronym = row.strategy_acronym;
+				const color = row.strategy_color;
+				if (acronym && color && color !== "default") {
+					return <Tag color={color}>{acronym}</Tag>;
+				}
+				const meta = getStrategyMeta(row.strategy);
+				if (meta) return <Tag color={meta.color}>{meta.acronym}</Tag>;
+				return <span className="text-gray-500 text-xs">{row.strategy_name ?? row.strategy}</span>;
+			},
 		},
 		{
 			title: "Count",

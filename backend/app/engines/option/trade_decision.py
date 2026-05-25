@@ -19,7 +19,10 @@ class TradeDecision:
     reasoning: str           # Brief explanation of decision
     threshold_open: float    # Threshold for OPEN (default 75)
     threshold_skip: float    # Threshold for SKIP (default 60)
-    strategy_spec: object | None = None  # StrategySpec (populated if action == OPEN)
+    strategy_spec: object | None = None                   # StrategySpec (populated if action == OPEN)
+    edge_source: str = "market_price"                     # see ADR 004: "market_price" or "synthetic_iv_rv"
+    zone: str | None = None                               # Zone A/B/C/D from L1
+    evaluation: OpportunityEvaluation | None = None       # Full L4 evaluation (sub-scores)
 
 
 def make_trade_decision(
@@ -48,8 +51,13 @@ def make_trade_decision(
     threshold_open = position_config.get("decision_threshold_open", 75.0)
     threshold_skip = position_config.get("decision_threshold_skip", 60.0)
 
-    # Ensure thresholds are valid
-    if threshold_open <= threshold_skip:
+    # debug.force_open: bypass scoring, always OPEN
+    if position_config.get("debug_force_open", False):
+        threshold_open = -1.0
+        threshold_skip = -2.0
+
+    # Ensure thresholds are valid (skip guard when force_open is active)
+    elif threshold_open <= threshold_skip:
         threshold_open = 75.0
         threshold_skip = 60.0
 

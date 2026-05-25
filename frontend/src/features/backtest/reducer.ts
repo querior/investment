@@ -9,11 +9,15 @@ import type {
 	CreateRunPayload,
 	MetricsSummary,
 	NavDataPoint,
+	PortfolioTimeseriesPoint,
 	RunParameter,
 	RunWeightDto,
 	StrategyPerformance,
 	DecisionLog,
 	DecisionLogsState,
+	DecisionMatrixRow,
+	DecisionMatrixState,
+	ZoneStat,
 } from "./types";
 
 const initialState: BacktestState = {
@@ -47,11 +51,17 @@ const initialState: BacktestState = {
 	decisionLogs: {
 		items: [],
 		page: 1,
-		page_size: 50,
+		page_size: 20,
 		total: 0,
 		loading: false,
 		error: null,
 		filters: {},
+	},
+	decisionMatrix: {
+		rows: [],
+		zone_stats: {},
+		loading: false,
+		error: null,
 	},
 };
 
@@ -252,6 +262,8 @@ const slice = createSlice({
 				runId: number;
 				page?: number;
 				limit?: number;
+				strategy?: string;
+				macro_regime?: string;
 			}>
 		) {
 			state.loading = true;
@@ -330,6 +342,23 @@ const slice = createSlice({
 		) {
 			state.decisionLogs.filters = action.payload;
 		},
+		// --- decision matrix ---
+		fetchDecisionMatrixRequest(
+			state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {
+			state.decisionMatrix.loading = true;
+			state.decisionMatrix.error = null;
+			state.decisionMatrix.rows = [];
+		},
+		fetchDecisionMatrixSuccess(
+			state,
+			action: PayloadAction<{ rows: DecisionMatrixRow[]; zone_stats: Record<string, ZoneStat> }>
+		) {
+			state.decisionMatrix.loading = false;
+			state.decisionMatrix.rows = action.payload.rows;
+			state.decisionMatrix.zone_stats = action.payload.zone_stats;
+		},
 		// --- execute run ---
 		executeRunRequest(
 			state,
@@ -340,7 +369,14 @@ const slice = createSlice({
 			if (run) run.status = "RUNNING";
 			if (state.currentRun?.id === action.payload.runId) {
 				state.currentRun.status = "RUNNING";
+				state.currentRun.portfolio_timeseries = [];
+				state.currentRun.nav = [];
+				state.currentRun.summary = undefined;
+				state.currentRun.performances = [];
 			}
+			state.positions = { items: [], page: 1, page_size: 20, total: 0 };
+			state.decisionLogs = { items: [], page: 1, page_size: 20, total: 0, loading: false, error: null, filters: {} };
+			state.decisionMatrix = { rows: [], zone_stats: {}, loading: false, error: null };
 		},
 		executeRunSuccess(
 			state,
@@ -382,18 +418,47 @@ const slice = createSlice({
 			action: PayloadAction<{ backtestId: number; runId: number }>
 		) {
 			state.invalidatingRunId = action.payload.runId;
+			state.positions = { items: [], page: 1, page_size: 20, total: 0 };
+			state.decisionLogs = { items: [], page: 1, page_size: 20, total: 0, loading: false, error: null, filters: {} };
+			state.decisionMatrix = { rows: [], zone_stats: {}, loading: false, error: null };
 		},
 		invalidateRunSuccess(state, action: PayloadAction<number>) {
 			state.invalidatingRunId = null;
 			const reset = (run: BacktestRunDto) => {
 				run.status = "READY";
 				run.summary = undefined;
+				run.nav = [];
+				run.portfolio_timeseries = [];
+				run.performances = [];
 			};
 			const run = state.runs.find((r) => r.id === action.payload);
 			if (run) reset(run);
 			if (state.currentRun?.id === action.payload) {
 				reset(state.currentRun);
 				state.runWeights = [];
+			}
+		},
+		// --- run metrics (lightweight polling for charts) ---
+		fetchRunMetricsRequest(
+			_state,
+			_action: PayloadAction<{ backtestId: number; runId: number }>
+		) {},
+		fetchRunMetricsSuccess(
+			state,
+			action: PayloadAction<{
+				summary: MetricsSummary;
+				nav: NavDataPoint[];
+				portfolio_timeseries: PortfolioTimeseriesPoint[];
+				performances?: StrategyPerformance[];
+			}>
+		) {
+			if (state.currentRun) {
+				state.currentRun.summary = action.payload.summary;
+				state.currentRun.nav = action.payload.nav;
+				state.currentRun.portfolio_timeseries = action.payload.portfolio_timeseries;
+				if (action.payload.performances) {
+					state.currentRun.performances = action.payload.performances;
+				}
 			}
 		},
 		backtestActionFailure(state, action: PayloadAction<string>) {
@@ -443,6 +508,10 @@ export const {
 	fetchDecisionLogsRequest,
 	fetchDecisionLogsSuccess,
 	setDecisionLogsFilters,
+	fetchDecisionMatrixRequest,
+	fetchDecisionMatrixSuccess,
+	fetchRunMetricsRequest,
+	fetchRunMetricsSuccess,
 	backtestActionFailure,
 } = slice.actions;
 

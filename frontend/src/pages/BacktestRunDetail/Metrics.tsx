@@ -51,6 +51,13 @@ const Metrics = ({ currentRun }: MetricsProps) => {
 			<Card size="small">
 				<Statistic title="N. trade" value={summary.n_trades ?? "—"} />
 			</Card>
+			<Card size="small">
+				<Statistic
+					title="Max Consecutive Losses"
+					value={summary.max_consecutive_losses ?? "—"}
+					valueStyle={{ color: (summary.max_consecutive_losses ?? 0) > 0 ? "#cf1322" : undefined }}
+				/>
+			</Card>
 		</div>
 	);
 };

@@ -38,9 +38,19 @@ class DecisionLog(Base):
     edge                    : Mapped[float] = mapped_column(Float, nullable=True)
     breakeven_distance      : Mapped[float] = mapped_column(Float, nullable=True)
 
+    # Pricing source — see ADR 004
+    edge_source             : Mapped[str]   = mapped_column(String, nullable=True)
+
     # Decision Engine (L4-L5)
     decision_action         : Mapped[str]   = mapped_column(String)
     decision_score          : Mapped[float] = mapped_column(Float, default=0.0)
     decision_reasoning      : Mapped[str]   = mapped_column(Text, nullable=True)
+
+    # Opportunity evaluation sub-scores (L4) — see opportunity_evaluator.py
+    pricing_edge_score      : Mapped[float] = mapped_column(Float, nullable=True)
+    risk_reward_score       : Mapped[float] = mapped_column(Float, nullable=True)
+    breakeven_score         : Mapped[float] = mapped_column(Float, nullable=True)
+    execution_cost_score    : Mapped[float] = mapped_column(Float, nullable=True)
+    capital_efficiency_score: Mapped[float] = mapped_column(Float, nullable=True)
 
     created_at              : Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

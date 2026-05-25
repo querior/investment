@@ -67,6 +67,19 @@ def _migrate() -> None:
                         ADD COLUMN backtest_id INTEGER REFERENCES backtests(id) ON DELETE CASCADE;
                 END IF;
             END $$;
+            ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS max_consecutive_losses INTEGER;
+            -- entry_max_loss e entry_max_profit su backtest_positions
+            ALTER TABLE backtest_positions ADD COLUMN IF NOT EXISTS entry_max_loss FLOAT;
+            ALTER TABLE backtest_positions ADD COLUMN IF NOT EXISTS entry_max_profit FLOAT;
+            -- ADR 004: edge_source su decision_logs
+            ALTER TABLE decision_logs
+                ADD COLUMN IF NOT EXISTS edge_source VARCHAR;
+            -- Sub-scores L4 opportunity evaluation
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS pricing_edge_score FLOAT;
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS risk_reward_score FLOAT;
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS breakeven_score FLOAT;
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS execution_cost_score FLOAT;
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS capital_efficiency_score FLOAT;
             -- Migrazione allocation_history: aggiunge id SERIAL come PK e run_id per isolamento backtest
             DO $$
             BEGIN

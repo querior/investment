@@ -8,9 +8,10 @@ from app.backtest.data_preparation.momentum import add_momentum_features
 from app.backtest.data_preparation.range import add_range_features
 from app.backtest.data_preparation.squeeze import add_ttm_squeeze, add_volume_metrics
 from app.backtest.data_preparation.macro import add_macro_features
+from app.backtest.domain.strategy.entry_scoring import calculate_entry_score
 
 
-def build_backtest_dataset(df: pd.DataFrame, db, params_dict: dict, run) -> pd.DataFrame:
+def build_backtest_dataset(df: pd.DataFrame, db, params_dict: dict, run, entry_config: dict | None = None) -> pd.DataFrame:
     """
     Build complete backtest dataset with all features and enrichment.
 
@@ -23,13 +24,15 @@ def build_backtest_dataset(df: pd.DataFrame, db, params_dict: dict, run) -> pd.D
     6. Add range features
     7. Add TTM Squeeze + Volume Metrics (TIER 2 MEDIA)
     8. Add macro features
-    9. Filter for backtest period (start_date to end_date)
+    9. Calculate entry_score per row (uses all previously computed indicators)
+    10. Filter for backtest period (start_date to end_date)
 
     Args:
         df: Initial market dataframe (usually from prepare_market_df)
         db: Database session
         params_dict: Dictionary containing parameters including IV parameters
         run: BacktestRun object with start_date and end_date
+        entry_config: Entry config dict for entry_score calculation (optional, uses defaults if None)
 
     Returns:
         pd.DataFrame: Complete backtest dataset with all features
@@ -90,7 +93,17 @@ def build_backtest_dataset(df: pd.DataFrame, db, params_dict: dict, run) -> pd.D
     # --- 7. Macro features ---
     df = add_macro_features(df, db)
 
-    # --- 8. Filter for backtest period (remove warmup period) ---
-    df = df[(df["date"] >= pd.Timestamp(run.start_date)) & (df["date"] <= pd.Timestamp(run.end_date))] # type: ignore
+    # --- 8. Entry score per row (uses all indicators computed above) ---
+    _entry_config = entry_config or {}
+    df["entry_score"] = df.apply(lambda row: calculate_entry_score(row, _entry_config), axis=1)
+
+    # --- 9. Drop warmup NaN rows (indicators with rolling windows produce leading NaNs) ---
+    # Must happen before date filter so warmup rows don't bleed into the backtest period.
+    warmup_cols = ["iv_rank", "adx", "sma_50", "rsi_14", "squeeze_intensity"]
+    available = [c for c in warmup_cols if c in df.columns]
+    df = df.dropna(subset=available)
+
+    # --- 10. Filter for backtest period ---
+    df = df[(df["date"] >= pd.Timestamp(run.start_date)) & (df["date"] <= pd.Timestamp(run.end_date))]  # type: ignore
 
     return df

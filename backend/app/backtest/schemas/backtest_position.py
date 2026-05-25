@@ -45,6 +45,8 @@ class BacktestPosition(Base):
     entry_ev_net: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     entry_prob_profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     entry_transaction_costs: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_max_loss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_max_profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

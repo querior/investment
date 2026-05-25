@@ -67,6 +67,14 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
         "unit": "value",
         "precision": 2,
     },
+    "entry.target_delta_long_call": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.10",
+        "unit": "value",
+        "precision": 2,
+    },
     "entry.cooldown_days": {
         "type": "int",
         "min": 0,
@@ -403,7 +411,7 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
         "type": "float",
         "min": 0.0,
         "max": 100.0,
-        "default": "0.03",
+        "default": "3",
         "unit": "pct",
         "precision": 2,
     },
@@ -570,6 +578,15 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
     "ticker": {
         "type": "string",
         "default": "IWM",
+        "unit": "value",
+    },
+
+    # =========================================================================
+    # DEBUG PARAMETERS
+    # =========================================================================
+    "debug.force_open": {
+        "type": "bool",
+        "default": "true",
         "unit": "value",
     },
 }

@@ -151,13 +151,13 @@ class TestBreakevenScore:
     def test_breakeven_very_far(self):
         """Breakeven very far (> 5 sigma) → score 0."""
         pricing = _create_pricing_context(
-            breakeven_distance=25.0,  # 25% move
+            breakeven_distance=40.0,  # expected_move ≈ 7.02 → sigmas ≈ 5.7 > 5 → score 0
             spot=100,
             iv=0.20,
             dte_days=45,
         )
         eval = evaluate_opportunity(pricing)
-        # breakeven_sigmas ≈ 5.77 → score = 100 - 5.77 * 20 < 0 → 0
+        # breakeven_sigmas ≈ 5.7 → score = max(0, 100 - 5.7 * 20) = 0
         assert eval.breakeven_score == 0.0
 
     def test_expected_move_zero(self):
@@ -234,25 +234,41 @@ class TestCompositeScore:
 
     def test_perfect_score(self):
         """All dimensions score 100 → composite 100."""
+        # pricing_edge=100: edge/fair_value = 1.0/2.0 = 0.5 → score = 100
+        # risk_reward=100: debit fair_value=2, spread=10 → rr=4 → score=100
+        # breakeven=100: distance=0 → sigmas=0 → score=100
+        # execution=100: bid_ask_pct=0 → score=100
+        # capital=100: theta=0.5/2.0*365=91 → score=100
         pricing = PricingContext(
             strategy_name="test",
             spot=100, iv=0.20, dte_days=45,
             strikes={"leg_0": 100, "leg_1": 110},
             delta=0.5, gamma=0.02, vega=10.0, theta=-0.5,
-            market_price=2.0, fair_value=2.5,
+            market_price=1.0, fair_value=2.0,
             bid_ask_spread=0.0, bid_ask_pct=0.0,
-            edge=0.5, breakeven_distance=0.5,
+            edge=1.0, breakeven_distance=0.0,
         )
         eval = evaluate_opportunity(pricing)
-        # All scores 100 → composite = 100
-        assert eval.composite_score > 90
+        assert eval.composite_score == pytest.approx(100.0)
 
     def test_zero_score(self):
         """All dimensions score 0 → composite 0."""
-        pricing = _create_pricing_context(edge=0.0, fair_value=0.001)
+        # pricing_edge=0: edge=0
+        # risk_reward=0: fair_value(11) > spread(10) → max_profit=0
+        # breakeven=0: distance=40 → sigmas≈5.7 > 5
+        # execution=0: bid_ask_pct=0.15 (= max)
+        # capital=0: theta=0
+        pricing = PricingContext(
+            strategy_name="test",
+            spot=100, iv=0.20, dte_days=45,
+            strikes={"leg_0": 100, "leg_1": 110},
+            delta=0.5, gamma=0.02, vega=10.0, theta=0.0,
+            market_price=11.0, fair_value=11.0,
+            bid_ask_spread=1.65, bid_ask_pct=0.15,
+            edge=0.0, breakeven_distance=40.0,
+        )
         eval = evaluate_opportunity(pricing)
-        # With fair_value near zero, pricing_edge = 0, composite should be low
-        assert eval.composite_score < 20
+        assert eval.composite_score == 0.0
 
 
 class TestFullPipelineL1toL4:
@@ -295,7 +311,7 @@ class TestFullPipelineL1toL4:
         assert isinstance(eval.composite_score, float)
 
     def test_no_trade_strategy_pipeline(self):
-        """no_trade strategy → composite_score = 0."""
+        """no_trade strategy → calculate_pricing returns None (no builder)."""
         row = pd.Series({
             "close": 100,
             "iv": 0.2,
@@ -306,10 +322,7 @@ class TestFullPipelineL1toL4:
         spec = no_trade_strategy()
 
         pricing = calculate_pricing(spec, row, entry_config)
-        eval = evaluate_opportunity(pricing)
-
-        # no_trade should have minimal edge
-        assert eval.pricing_edge_score == 0.0
+        assert pricing is None
 
 
 # Helper function to create test pricing contexts

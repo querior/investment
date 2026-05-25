@@ -32,6 +32,7 @@ export type MetricsSummary = {
 	max_drawdown: number | null;
 	win_rate: number | null;
 	profit_factor: number | null;
+	max_consecutive_losses: number | null;
 	n_trades: number | null;
 };
 
@@ -70,6 +71,7 @@ export type BacktestRunDto = {
 	exit_rules?: Record<string, string>;
 	performances?: StrategyPerformance[];
 	nav?: NavDataPoint[];
+	portfolio_timeseries?: PortfolioTimeseriesPoint[];
 };
 
 export type BacktestListResponse = {
@@ -156,6 +158,12 @@ export type BacktestPositionDto = {
 	unrealized_pnl: number | null;
 	performance_pct: number | null;
 	days_in_trade: number;
+	entry_max_loss: number | null;
+	entry_max_profit: number | null;
+	entry_prob_profit: number | null;
+	entry_ev_net: number | null;
+	capital_at_risk_pct: number | null;
+	risk_limit_ok: boolean | null;
 };
 
 export type BacktestPositionHistoryDto = {
@@ -192,6 +200,16 @@ export type NavDataPoint = {
 	period_return: number;
 };
 
+export type PortfolioTimeseriesPoint = {
+	snapshot_date: string;
+	total_equity: number;
+	realized_pnl: number;
+	unrealized_pnl: number;
+	total_pnl: number;
+	underlying_price: number;
+	iv: number;
+};
+
 export type BacktestState = {
 	// list
 	backtests: BacktestDto[];
@@ -218,6 +236,8 @@ export type BacktestState = {
 	backtestConfig: BacktestConfigDto | null;
 	// decision logs
 	decisionLogs: DecisionLogsState;
+	// decision matrix
+	decisionMatrix: DecisionMatrixState;
 };
 
 export const STATUS_BADGE: Record<
@@ -276,6 +296,41 @@ export type DecisionLog = {
 	decision_action: string;
 	decision_score: number;
 	decision_reasoning: string | null;
+	pricing_edge_score: number | null;
+	risk_reward_score: number | null;
+	breakeven_score: number | null;
+	execution_cost_score: number | null;
+	capital_efficiency_score: number | null;
+};
+
+export type DecisionMatrixRow = {
+	zone: string | null;
+	strategy_name: string;
+	decision_action: string;
+	count: number;
+	avg_score: number | null;
+	avg_entry_score: number | null;
+	avg_iv_rank: number | null;
+	avg_adx: number | null;
+	avg_pricing_edge: number | null;
+	avg_risk_reward: number | null;
+	avg_breakeven: number | null;
+	avg_execution_cost: number | null;
+	avg_capital_efficiency: number | null;
+};
+
+export type ZoneStat = {
+	n_closed: number;
+	win_rate: number;
+	avg_pnl: number;
+	max_drawdown: number;
+};
+
+export type DecisionMatrixState = {
+	rows: DecisionMatrixRow[];
+	zone_stats: Record<string, ZoneStat>;
+	loading: boolean;
+	error: string | null;
 };
 
 export type DecisionLogsState = {
