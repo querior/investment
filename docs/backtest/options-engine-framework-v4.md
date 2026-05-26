@@ -873,6 +873,11 @@ Non esiste una terza opzione. Forzare un trade fuori dai parametri di rischio pe
 
 | Versione | Modifica |
 |---|---|
+| v5 | Rollout implementato: posizioni che escono per DTE vengono riaperte sulla scadenza successiva; confronto via run separati (Approccio A) |
+| v5 | Configurazione per-strategia × zona A/B/C/D: ogni strategia abilitabile/disabilitabile e parametrizzabile indipendentemente per zona |
+| v5 | Commissioni IBKR round-trip: $0.65/contratto/gamba + min $1.00/ordine; entry e exit deducted da cash e realized_pnl; configurabili via `cost_model.*` |
+| v5 | LEADS — 3 indicatori leading aggiunti all'entry score (w7 term slope, w8 credit spread, w9 VVIX rank); segnali FRED VXVCLS + ^VVIX yfinance |
+| v5 | Performance by Strategy espansa con zone breakdown (count/win/lose/win_rate/pnl/days per zona) |
 | v4 | Sezione 9 Step 4 espansa — guida completa al bid/ask con calcolo per struttura, soglie per numero di gambe, liquidità del titolo, tecniche di esecuzione e costo reale |
 | v4 | Sezione 9 riscritta — pricing per titolo collegato direttamente alla quota di rischio del capitale |
 | v4 | Aggiunta Sezione 14 — Pricing e Sizing in relazione al rischio |

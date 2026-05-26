@@ -26,6 +26,18 @@
 - [ ] Benchmark di confronto (es. SPY buy&hold) nel grafico NAV
 - [ ] Export CSV dei risultati
 
+## Backtest Options Engine
+- [x] Decision Engine L1-L5 integrato nel backtest EOD
+- [x] Decision Logs (DB + frontend) con filtri per strategia/azione/data
+- [x] Entry score composito 9 componenti (w1–w9) con LEADS (term slope, credit spread, VVIX)
+- [x] Configurazione per-strategia × zona (A/B/C/D): enable/disable + delta + exit params
+- [x] Performance by Strategy con zone breakdown espandibile
+- [x] Commissioni IBKR round-trip: entry_transaction_costs + exit_transaction_costs su realized_pnl
+- [x] Rollout su DTE exit: riapre stessa strategia scadenza successiva (confronto via run separati)
+- [ ] Portfolio trailing stop (sospeso — rimandato a quando si gestirà un portafoglio multi-posizione)
+- [ ] Benchmark di confronto run con/senza rollout (UI side-by-side)
+- [ ] Export CSV posizioni e decision logs
+
 ## Backend — API
 - [ ] CRUD per gestione dinamica di indicatori (`macro_indicators`)
 - [ ] CRUD per gestione dinamica di market symbols (`market_symbols`)

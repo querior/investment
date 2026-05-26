@@ -6,18 +6,23 @@ Documento tecnico: implementazione dello score composito di entry secondo il fra
 
 **Fonte**: Options Engine Framework, sezione 5 (segnali di ingresso)
 
-Lo score composito valuta la **qualità della posizione** sulla base di sei fattori, ognuno con peso diverso:
+Lo score composito valuta la **qualità della posizione** sulla base di 9 fattori: 6 trailing (storici) e 3 leading (variazioni recenti macro/volatilità).
 
 ```
-Q_entry = w1*(100 - IV_rank)       # peso 30% — regime IV
-        + w2*(1 - IV/HV_ratio)     # peso 20% — IV vs realized volatility
-        + w3*squeeze_intensity     # peso 20% — compressione Bollinger Bands
-        + w4*RSI_neutrality        # peso 15% — momentum condition
-        + w5*DTE_score             # peso 10% — timing
-        + w6*volume_ratio          # peso  5% — liquidity
+Q_entry = w1*(100 - IV_rank)       # peso 30% — regime IV (trailing)
+        + w2*(1 - IV/HV_ratio)     # peso 20% — IV vs realized vol (trailing)
+        + w3*squeeze_intensity     # peso 20% — compressione BB (trailing)
+        + w4*RSI_neutrality        # peso 15% — momentum (trailing)
+        + w5*DTE_score             # peso 10% — timing (trailing)
+        + w6*volume_ratio          # peso  5% — liquidità (trailing)
+        + w7*term_slope_score      # peso 10% — IV term slope delta5 (leading)
+        + w8*credit_spread_score   # peso  5% — credit spread delta5 (leading)
+        + w9*vvix_rank_score       # peso  5% — VVIX percentile rank (leading)
 
-Score: 0-100
+Score: 0-100 (normalizzato sui pesi effettivi)
 ```
+
+> I pesi w7/w8/w9 sono configurabili via `entry_score.w7_term_structure`, `entry_score.w8_credit_spread`, `entry_score.w9_vvix`.
 
 ---
 
@@ -111,6 +116,49 @@ ratio < 0.5 o > 1.5: score basso (30)
 ```
 
 **Razionale**: Basso volume relativo indica accumulo (squeeze), alto volume indica instabilità.
+
+---
+
+### 7. IV Term Structure Slope (w7 = 10%) — LEADING
+
+**Segnale**: `iv_term_slope_delta5 = (VXVCLS − VIXCLS)[t] − (VXVCLS − VIXCLS)[t−5]`
+
+Misura il cambiamento della pendenza della curva IV a 5 giorni:
+- **Negativo** (slope in calo): il mercato si calma → condizione favorevole → score alto
+- **Positivo** (slope in salita): stress in aumento → score basso
+
+```
+Score 100 se delta ≤ −0.02 | Score 50 se delta = 0 | Score 0 se delta ≥ +0.02
+Interpolazione lineare tra questi estremi.
+```
+
+---
+
+### 8. Credit Spread (w8 = 5%) — LEADING
+
+**Segnale**: `credit_spread_delta5 = BAA10Y[t] − BAA10Y[t−5]`
+
+Misura il cambiamento dello spread creditizio a 5 giorni:
+- **Negativo** (spread in calo): stress creditizio si risolve → condizione favorevole
+- **Positivo** (spread in salita): stress in aumento → condition sfavorevole
+
+```
+Score 100 se delta ≤ −0.05 | Score 50 se delta = 0 | Score 0 se delta ≥ +0.05
+```
+
+---
+
+### 9. VVIX Rank (w9 = 5%) — LEADING
+
+**Segnale**: `vvix_rank = percentile(^VVIX, finestra 252 giorni)`
+
+Misura l'incertezza sulla volatilità stessa (volatility-of-volatility):
+- **Basso** (< 30%): mercato delle opzioni calmo → setup favorevole
+- **Alto** (> 70%): tail risk elevato → condizioni sfavorevoli
+
+```
+Score 100 se rank ≤ 20% | Score 0 se rank ≥ 80%
+```
 
 ---
 

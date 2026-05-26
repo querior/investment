@@ -25,6 +25,14 @@ Gestiti in `data_preparation/pipeline.py`
 |-----|------|---------|-------------|----------|
 | `adx.period` | int | 14 | Periodo ADX | `add_adx()` |
 
+### Leading Indicators — LEADS (TIER 2 MEDIA)
+
+| Key | Type | Default | Descrizione | Usato da |
+|-----|------|---------|-------------|----------|
+| *(calcolati automaticamente)* | — | — | `iv_term_slope_delta5` (VXVCLS−VIXCLS, delta 5gg), `credit_spread_delta5` (BAA10Y delta 5gg), `vvix_rank` (^VVIX percentile 252gg) | `leads.py` |
+
+> I LEADS non hanno parametri di configurazione propri — usano i pesi w7/w8/w9 dell'entry score.
+
 ### Squeeze e Volume (TIER 2 MEDIA)
 
 | Key | Type | Default | Descrizione | Usato da |
@@ -52,12 +60,30 @@ Gestiti in `runs.py`
 
 | Key | Type | Default | Descrizione | Usato da |
 |-----|------|---------|-------------|----------|
-| `entry.target_delta_short` | float | — | Delta target per short leg opzioni | `select_strategy()` |
-| `entry.target_delta_long` | float | — | Delta target per long leg opzioni | `select_strategy()` |
 | `entry.iv_min_threshold` | float | 0.18 | IV minimo per entry | `_build_entry_config()` |
 | `entry.rsi_min_bull` | float | 40 | RSI minimo trend rialzista | `_build_entry_config()` |
 | `entry.iv_min_neutral` | float | 0.15 | IV minimo neutrale | `_build_entry_config()` |
 | `entry.iv_rv_ratio_min` | float | 1.1 | IV/RV ratio minimo | `_build_entry_config()` |
+| `entry.cooldown_days` | int | 5 | Giorni min prima di riaprire la stessa strategia dopo chiusura | `run_eod_backtest()` |
+
+### Per-Strategy Configuration (Zone-keyed)
+
+| Key | Type | Default | Descrizione | Usato da |
+|-----|------|---------|-------------|----------|
+| `strategy_config.overrides` | JSON | vedi schema | Config per strategia × zona A/B/C/D: `enabled`, `delta_short`, `delta_long`, `delta_long_call`, `profit_target_pct`, `stop_loss_pct`, `dte_exit_days`, `size_multiplier` | `select_strategy()`, `run_eod_backtest()` |
+
+Struttura JSON:
+```json
+{
+  "bull_put_spread": {
+    "A": { "enabled": false, "delta_short": 0.20, "profit_target_pct": 50, ... },
+    "B": { "enabled": true,  "delta_short": 0.20, "profit_target_pct": 50, ... },
+    "C": { "enabled": false, ... },
+    "D": { "enabled": false, ... }
+  },
+  ...
+}
+```
 
 ### Exit Rules (TIER 2+)
 
@@ -82,6 +108,33 @@ Gestiti in `runs.py`
 | `exit.rule_delta_breach.threshold` | float | 0.50 | Delta breach soglia | `_build_exit_config()` |
 | `exit.rule_theta_decay.enabled` | bool | false | Abilita exit su theta decay | `_build_exit_config()` |
 | `exit.rule_theta_decay.threshold_ratio` | float | 0.05 | Theta decay ratio | `_build_exit_config()` |
+
+### Entry Score — Pesi Leading Indicators (LEADS)
+
+| Key | Type | Default | Descrizione |
+|-----|------|---------|-------------|
+| `entry_score.w7_term_structure` | float | 0.10 | Peso IV term slope (VXVCLS−VIXCLS delta 5gg). Negativo = stress si risolve → score alto |
+| `entry_score.w8_credit_spread` | float | 0.05 | Peso credit spread (BAA10Y delta 5gg). Negativo = spread si stringe → score alto |
+| `entry_score.w9_vvix` | float | 0.05 | Peso VVIX rank percentile (252gg). Sotto 30 → score alto; sopra 70 → score basso |
+
+### Rollout
+
+| Key | Type | Default | Descrizione | Usato da |
+|-----|------|---------|-------------|----------|
+| `rollout.enabled` | bool | false | Riapre la stessa strategia sulla scadenza successiva quando la posizione chiude per DTE (bypassa decision engine e cooldown) | `run_eod_backtest()` |
+| `rollout.min_profit_pct` | float | 0 | Percentuale minima di P&L netto su initial_value per qualificarsi al roll. 0 = rollout sempre | `run_eod_backtest()` |
+
+### Cost Model (Commissioni IBKR)
+
+| Key | Type | Default | Descrizione | Usato da |
+|-----|------|---------|-------------|----------|
+| `cost_model.commission_per_contract` | float | 0.65 | Commissione per contratto per gamba ($) — IBKR Fixed pricing | `execute_eod_backtest()` |
+| `cost_model.min_commission` | float | 1.00 | Commissione minima per ordine ($) — IBKR Fixed pricing | `execute_eod_backtest()` |
+
+Le commissioni vengono applicate al round-trip:
+- **Entry**: `entry_transaction_costs` deducted da `portfolio.cash`
+- **Exit**: `exit_transaction_costs` deducted da `portfolio.cash` + `portfolio.realized_pnl`
+- `realized_pnl = position.pnl − entry_commission − exit_commission`
 
 ---
 
