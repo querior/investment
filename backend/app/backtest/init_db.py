@@ -211,6 +211,7 @@ def init_backtest_db(reset: bool = False) -> None:
                 ADD COLUMN IF NOT EXISTS entry_ev_net            FLOAT,
                 ADD COLUMN IF NOT EXISTS entry_prob_profit       FLOAT,
                 ADD COLUMN IF NOT EXISTS entry_transaction_costs FLOAT,
+                ADD COLUMN IF NOT EXISTS exit_transaction_costs  FLOAT,
                 ADD COLUMN IF NOT EXISTS entry_fair_value        FLOAT;
         """))
     with engine.begin() as conn:

@@ -35,15 +35,17 @@ _INDICATORS = [
     ("FEDFUNDS",  "Federal Funds Effective Rate",                              IndicatorFrequency.MONTHLY),
     ("T10Y2Y",    "10-Year Treasury Minus 2-Year Treasury",                    IndicatorFrequency.DAILY),
     ("VIXCLS",    "CBOE Volatility Index (VIX)",                               IndicatorFrequency.DAILY),
+    ("VXVCLS",    "CBOE S&P 500 3-Month Volatility Index (VIX3M)",             IndicatorFrequency.DAILY),
     ("BAA10Y",    "Moody's Baa Corporate Bond Spread",                         IndicatorFrequency.DAILY),
     ("NFCI",      "Chicago Fed National Financial Conditions",                 IndicatorFrequency.WEEKLY),
 ]
 
 _MARKET_SYMBOLS = [
-    ("SPY", "S&P 500 ETF",                              MarketSource.YAHOO, AssetType.ETF),
-    ("IEF", "iShares 7-10 Year Treasury Bond ETF",      MarketSource.YAHOO, AssetType.ETF),
-    ("DBC", "Invesco DB Commodity Index Tracking Fund", MarketSource.YAHOO, AssetType.ETF),
-    ("BIL", "SPDR Bloomberg 1-3 Month T-Bill ETF",      MarketSource.YAHOO, AssetType.ETF),
+    ("SPY",   "S&P 500 ETF",                              MarketSource.YAHOO, AssetType.ETF),
+    ("IEF",   "iShares 7-10 Year Treasury Bond ETF",      MarketSource.YAHOO, AssetType.ETF),
+    ("DBC",   "Invesco DB Commodity Index Tracking Fund", MarketSource.YAHOO, AssetType.ETF),
+    ("BIL",   "SPDR Bloomberg 1-3 Month T-Bill ETF",      MarketSource.YAHOO, AssetType.ETF),
+    ("^VVIX", "CBOE Volatility of Volatility Index",      MarketSource.YAHOO, AssetType.ETF),
 ]
 
 # (ticker_sorgente, output_name, transform, resample)

@@ -35,15 +35,18 @@ def calculate_entry_score(row: pd.Series, entry_config: dict) -> float:
         float: Entry score 0-100
     """
     # --- Extract weights from config (defaults match framework) ---
-    w1 = float(entry_config.get("entry_score.w1_iv_rank", 0.30))
-    w2 = float(entry_config.get("entry_score.w2_iv_hv", 0.20))
-    w3 = float(entry_config.get("entry_score.w3_squeeze", 0.20))
-    w4 = float(entry_config.get("entry_score.w4_rsi", 0.15))
+    w1 = float(entry_config.get("entry_score.w1_iv_rank", 0.25))
+    w2 = float(entry_config.get("entry_score.w2_iv_hv", 0.15))
+    w3 = float(entry_config.get("entry_score.w3_squeeze", 0.15))
+    w4 = float(entry_config.get("entry_score.w4_rsi", 0.10))
     w5 = float(entry_config.get("entry_score.w5_dte", 0.10))
     w6 = float(entry_config.get("entry_score.w6_volume", 0.05))
+    w7 = float(entry_config.get("entry_score.w7_term_structure", 0.10))
+    w8 = float(entry_config.get("entry_score.w8_credit_spread", 0.05))
+    w9 = float(entry_config.get("entry_score.w9_vvix", 0.05))
 
     # Normalize weights to sum = 1
-    total_weight = w1 + w2 + w3 + w4 + w5 + w6
+    total_weight = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + w9
     if total_weight == 0:
         total_weight = 1.0
     w1 /= total_weight
@@ -52,6 +55,9 @@ def calculate_entry_score(row: pd.Series, entry_config: dict) -> float:
     w4 /= total_weight
     w5 /= total_weight
     w6 /= total_weight
+    w7 /= total_weight
+    w8 /= total_weight
+    w9 /= total_weight
 
     # --- Component 1: IV Rank (0-100, already normalized) ---
     iv_rank = row.get("iv_rank")
@@ -139,6 +145,37 @@ def calculate_entry_score(row: pd.Series, entry_config: dict) -> float:
         else:
             component_6 = 30  # too high volume (expansion phase)
 
+    # --- Component 7: IV Term Structure (stress direction) ---
+    # iv_term_slope_delta5 < 0 → backwardation resolving → good entry for premium sellers
+    # iv_term_slope_delta5 > 0 → stress building → avoid new entries
+    term_delta = row.get("iv_term_slope_delta5")
+    if term_delta is None or pd.isna(term_delta):
+        component_7 = 50
+    else:
+        term_delta = float(term_delta)
+        # Map delta to 0-100: delta=-0.3 → 100, delta=0 → 50, delta=+0.3 → 0
+        component_7 = float(np.clip(50 - (term_delta / 0.3) * 50, 0, 100))
+
+    # --- Component 8: Credit Spread Direction ---
+    # credit_spread_delta5 < 0 → tightening (stress resolving) → good entry
+    # credit_spread_delta5 > 0 → widening (stress building) → avoid
+    cs_delta = row.get("credit_spread_delta5")
+    if cs_delta is None or pd.isna(cs_delta):
+        component_8 = 50
+    else:
+        cs_delta = float(cs_delta)
+        # Map delta to 0-100: delta=-0.20 → 100, delta=0 → 50, delta=+0.20 → 0
+        component_8 = float(np.clip(50 - (cs_delta / 0.20) * 50, 0, 100))
+
+    # --- Component 9: VVIX Rank (lower uncertainty = better entry) ---
+    # Low vvix_rank → IV direction calm → premium sellers have more edge
+    # High vvix_rank → IV direction uncertain → wider spreads, more risk
+    vvix_rank = row.get("vvix_rank")
+    if vvix_rank is None or pd.isna(vvix_rank):
+        component_9 = 50
+    else:
+        component_9 = float(np.clip(100 - float(vvix_rank), 0, 100))
+
     # --- Composite Score ---
     score = (
         w1 * component_1
@@ -147,6 +184,9 @@ def calculate_entry_score(row: pd.Series, entry_config: dict) -> float:
         + w4 * component_4
         + w5 * component_5
         + w6 * component_6
+        + w7 * component_7
+        + w8 * component_8
+        + w9 * component_9
     )
 
     return float(np.clip(score, 0, 100))

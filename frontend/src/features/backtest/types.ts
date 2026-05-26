@@ -36,6 +36,16 @@ export type MetricsSummary = {
 	n_trades: number | null;
 };
 
+export type ZonePerformance = {
+	count: number;
+	winning: number;
+	losing: number;
+	win_rate: number;
+	total_pnl: number;
+	avg_pnl: number;
+	avg_holding_days: number;
+};
+
 export type StrategyPerformance = {
 	strategy: string;
 	strategy_acronym: string | null;
@@ -49,6 +59,7 @@ export type StrategyPerformance = {
 	total_pnl: number;
 	avg_pnl: number;
 	max_drawdown: number | null;
+	zone_breakdown?: Record<string, ZonePerformance>;
 };
 
 export type BacktestRunDto = {
@@ -301,6 +312,9 @@ export type DecisionLog = {
 	breakeven_score: number | null;
 	execution_cost_score: number | null;
 	capital_efficiency_score: number | null;
+	iv_term_slope_delta5: number | null;
+	credit_spread_delta5: number | null;
+	vvix_rank: number | null;
 };
 
 export type DecisionMatrixRow = {

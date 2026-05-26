@@ -36,6 +36,7 @@ class Position:
   name: str
   legs: List[OptionLeg]
   opened_at: str
+  entry_zone: str = ""
   initial_value: float = 0.0
   is_open: bool = True
     
@@ -110,6 +111,15 @@ class Portfolio:
     position.is_open = False
     self.cash += position.price
     self._realized_pnl += position.pnl
+
+  def apply_entry_commission(self, amount: float) -> None:
+    """Deduct entry commission from cash (realized_pnl accounted at close)."""
+    self.cash -= amount
+
+  def apply_commission(self, amount: float) -> None:
+    """Deduct round-trip commission from both cash and realized_pnl at close."""
+    self.cash -= amount
+    self._realized_pnl -= amount
 
   def remove_closed_positions(self) -> None:
     self.positions = [p for p in self.positions if p.is_open]

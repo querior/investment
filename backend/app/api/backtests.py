@@ -426,6 +426,7 @@ def execute_run(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
     run.win_rate = None
     run.profit_factor = None
     run.n_trades = None
+    run.max_consecutive_losses = None
     run.error_message = ""
 
     # Delete previous results
@@ -578,6 +579,49 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
         if snapshots:
             strategies_data[strategy]["snapshots_for_dd"].extend(snapshots)
 
+    # Zone breakdown: join positions → decision_log on (run_id, strategy, date)
+    _zr = (
+        db.query(
+            BacktestPosition.position_type,
+            DecisionLog.zone,
+            BacktestPosition.realized_pnl,
+            BacktestPosition.opened_at,
+            BacktestPosition.closed_at,
+        )
+        .join(
+            DecisionLog,
+            (BacktestPosition.run_id == DecisionLog.run_id)
+            & (BacktestPosition.position_type == DecisionLog.strategy_name)
+            & (sa_cast(BacktestPosition.opened_at, String) == DecisionLog.date),
+        )
+        .filter(
+            BacktestPosition.run_id == run_id,
+            DecisionLog.decision_action == "OPEN",
+            BacktestPosition.realized_pnl.isnot(None),
+        )
+        .all()
+    )
+    _strat_zone: dict[str, dict[str, dict]] = {}
+    for _r in _zr:
+        _s, _z = _r.position_type, _r.zone or "UNKNOWN"
+        _strat_zone.setdefault(_s, {}).setdefault(_z, {"pnls": [], "days": []})
+        _strat_zone[_s][_z]["pnls"].append(float(_r.realized_pnl))
+        if _r.closed_at and _r.opened_at:
+            _strat_zone[_s][_z]["days"].append((_r.closed_at - _r.opened_at).days)
+
+    def _zstats(zd: dict) -> dict:
+        pnls, days = zd["pnls"], zd["days"]
+        wins = sum(1 for p in pnls if p > 0)
+        return {
+            "count": len(pnls),
+            "winning": wins,
+            "losing": sum(1 for p in pnls if p < 0),
+            "win_rate": round(wins / len(pnls), 4) if pnls else 0,
+            "total_pnl": round(sum(pnls), 2),
+            "avg_pnl": round(sum(pnls) / len(pnls), 2) if pnls else 0,
+            "avg_holding_days": round(sum(days) / len(days), 1) if days else 0,
+        }
+
     performances = []
     for strategy, data in sorted(strategies_data.items()):
         avg_days = (
@@ -607,6 +651,7 @@ def run_metrics(backtest_id: int, run_id: int, db: Session = Depends(get_db)):
             "total_pnl": round(data["total_pnl"], 2),
             "avg_pnl": round(avg_pnl, 2),
             "max_drawdown": round(max_dd, 4) if max_dd is not None else None,
+            "zone_breakdown": {z: _zstats(zd) for z, zd in _strat_zone.get(strategy, {}).items()},
         })
 
     # Fetch NAV data
@@ -836,6 +881,49 @@ def run_performance(
         if snapshots:
             strategies_data[strategy]["snapshots_for_dd"].extend(snapshots)
 
+    # Zone breakdown: join positions → decision_log on (run_id, strategy, date)
+    _zr = (
+        db.query(
+            BacktestPosition.position_type,
+            DecisionLog.zone,
+            BacktestPosition.realized_pnl,
+            BacktestPosition.opened_at,
+            BacktestPosition.closed_at,
+        )
+        .join(
+            DecisionLog,
+            (BacktestPosition.run_id == DecisionLog.run_id)
+            & (BacktestPosition.position_type == DecisionLog.strategy_name)
+            & (sa_cast(BacktestPosition.opened_at, String) == DecisionLog.date),
+        )
+        .filter(
+            BacktestPosition.run_id == run_id,
+            DecisionLog.decision_action == "OPEN",
+            BacktestPosition.realized_pnl.isnot(None),
+        )
+        .all()
+    )
+    _strat_zone: dict[str, dict[str, dict]] = {}
+    for _r in _zr:
+        _s, _z = _r.position_type, _r.zone or "UNKNOWN"
+        _strat_zone.setdefault(_s, {}).setdefault(_z, {"pnls": [], "days": []})
+        _strat_zone[_s][_z]["pnls"].append(float(_r.realized_pnl))
+        if _r.closed_at and _r.opened_at:
+            _strat_zone[_s][_z]["days"].append((_r.closed_at - _r.opened_at).days)
+
+    def _zstats(zd: dict) -> dict:
+        pnls, days = zd["pnls"], zd["days"]
+        wins = sum(1 for p in pnls if p > 0)
+        return {
+            "count": len(pnls),
+            "winning": wins,
+            "losing": sum(1 for p in pnls if p < 0),
+            "win_rate": round(wins / len(pnls), 4) if pnls else 0,
+            "total_pnl": round(sum(pnls), 2),
+            "avg_pnl": round(sum(pnls) / len(pnls), 2) if pnls else 0,
+            "avg_holding_days": round(sum(days) / len(days), 1) if days else 0,
+        }
+
     performances = []
     for strategy, data in sorted(strategies_data.items()):
         avg_days = (
@@ -865,6 +953,7 @@ def run_performance(
             "total_pnl": round(data["total_pnl"], 2),
             "avg_pnl": round(avg_pnl, 2),
             "max_drawdown": round(max_dd, 4) if max_dd is not None else None,
+            "zone_breakdown": {z: _zstats(zd) for z, zd in _strat_zone.get(strategy, {}).items()},
         })
 
     # Fetch NAV data
@@ -1130,6 +1219,9 @@ def get_decision_logs(
                 "breakeven_score": log.breakeven_score,
                 "execution_cost_score": log.execution_cost_score,
                 "capital_efficiency_score": log.capital_efficiency_score,
+                "iv_term_slope_delta5": log.iv_term_slope_delta5,
+                "credit_spread_delta5": log.credit_spread_delta5,
+                "vvix_rank": log.vvix_rank,
             }
             for log in logs
         ]

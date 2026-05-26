@@ -6,22 +6,27 @@ Defines valid ranges, types, and defaults for all configurable parameters.
 import json
 from typing import TypedDict, Any
 
-# Default configuration for each option strategy.
-# Used as initial values for strategy_config.overrides parameter.
+def _zone_cfg(enabled_in: list[str], base: dict) -> dict:
+    """Build per-zone config dict from a base config and the zones where the strategy is enabled."""
+    return {z: {**base, "enabled": z in enabled_in} for z in ["A", "B", "C", "D"]}
+
+
+# Default configuration for each option strategy, keyed by zone.
+# enabled=True only for zones where the strategy appears in STRATEGY_MATRIX (strategy_selector.py).
 STRATEGY_DEFAULTS: dict[str, dict] = {
-    "bull_put_spread":     {"enabled": True, "delta_short": 0.20, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "bear_call_spread":    {"enabled": True, "delta_short": 0.20, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "iron_condor":         {"enabled": True, "delta_short": 0.10, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 40, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "iron_butterfly":      {"enabled": True, "delta_short": 0.50, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 25, "stop_loss_pct": 200, "dte_exit_days": 14, "size_multiplier": 0.7},
-    "bull_call_spread":    {"enabled": True, "delta_short": 0.10, "delta_long": 0.30, "delta_long_call": 0.30, "profit_target_pct": 60, "stop_loss_pct": 100, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "bear_put_spread":     {"enabled": True, "delta_short": 0.10, "delta_long": 0.30, "delta_long_call": 0.10, "profit_target_pct": 60, "stop_loss_pct": 100, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "long_straddle":       {"enabled": True, "delta_short": 0.50, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 100, "stop_loss_pct": 50, "dte_exit_days": 30, "size_multiplier": 0.8},
-    "long_strangle":       {"enabled": True, "delta_short": 0.30, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 100, "stop_loss_pct": 50, "dte_exit_days": 30, "size_multiplier": 0.8},
-    "neutral_broken_wing": {"enabled": True, "delta_short": 0.15, "delta_long": 0.05, "delta_long_call": 0.05, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "jade_lizard":         {"enabled": True, "delta_short": 0.20, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "reverse_jade_lizard": {"enabled": True, "delta_short": 0.20, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 50, "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0},
-    "calendar_spread":     {"enabled": True, "delta_short": 0.40, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 50, "stop_loss_pct": 100, "dte_exit_days": 7,  "size_multiplier": 0.8},
-    "diagonal_spread":     {"enabled": True, "delta_short": 0.30, "delta_long": 0.15, "delta_long_call": 0.15, "profit_target_pct": 50, "stop_loss_pct": 100, "dte_exit_days": 14, "size_multiplier": 0.8},
+    "bull_put_spread":     _zone_cfg(["B"],      {"delta_short": 0.20, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 50,  "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "bear_call_spread":    _zone_cfg(["B"],      {"delta_short": 0.20, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 50,  "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "iron_condor":         _zone_cfg(["D"],      {"delta_short": 0.10, "delta_long": 0.05, "delta_long_call": 0.10, "profit_target_pct": 40,  "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "iron_butterfly":      _zone_cfg(["D"],      {"delta_short": 0.50, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 25,  "stop_loss_pct": 200, "dte_exit_days": 14, "size_multiplier": 0.7}),
+    "bull_call_spread":    _zone_cfg(["A"],      {"delta_short": 0.10, "delta_long": 0.30, "delta_long_call": 0.30, "profit_target_pct": 60,  "stop_loss_pct": 100, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "bear_put_spread":     _zone_cfg(["A"],      {"delta_short": 0.10, "delta_long": 0.30, "delta_long_call": 0.10, "profit_target_pct": 60,  "stop_loss_pct": 100, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "long_straddle":       _zone_cfg(["C"],      {"delta_short": 0.50, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 100, "stop_loss_pct": 50,  "dte_exit_days": 30, "size_multiplier": 0.8}),
+    "long_strangle":       _zone_cfg(["C"],      {"delta_short": 0.30, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 100, "stop_loss_pct": 50,  "dte_exit_days": 30, "size_multiplier": 0.8}),
+    "put_broken_wing_butterfly": _zone_cfg(["A", "C"], {"delta_short": 0.15, "delta_long": 0.05, "delta_long_call": 0.05, "profit_target_pct": 50,  "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "jade_lizard":         _zone_cfg(["B", "D"], {"delta_short": 0.20, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 50,  "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "reverse_jade_lizard": _zone_cfg(["B"],      {"delta_short": 0.20, "delta_long": 0.10, "delta_long_call": 0.10, "profit_target_pct": 50,  "stop_loss_pct": 200, "dte_exit_days": 21, "size_multiplier": 1.0}),
+    "calendar_spread":     _zone_cfg(["D"],      {"delta_short": 0.40, "delta_long": 0.00, "delta_long_call": 0.00, "profit_target_pct": 50,  "stop_loss_pct": 100, "dte_exit_days": 7,  "size_multiplier": 0.8}),
+    "diagonal_spread":     _zone_cfg(["D"],      {"delta_short": 0.30, "delta_long": 0.15, "delta_long_call": 0.15, "profit_target_pct": 50,  "stop_loss_pct": 100, "dte_exit_days": 14, "size_multiplier": 0.8}),
 }
 
 
@@ -123,6 +128,30 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
         "precision": 2,
     },
     "entry_score.w6_volume": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.05",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "entry_score.w7_term_structure": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.10",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "entry_score.w8_credit_spread": {
+        "type": "float",
+        "min": 0.0,
+        "max": 1.0,
+        "default": "0.05",
+        "unit": "ratio",
+        "precision": 2,
+    },
+    "entry_score.w9_vvix": {
         "type": "float",
         "min": 0.0,
         "max": 1.0,
@@ -583,6 +612,43 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
         "type": "bool",
         "default": "true",
         "unit": "value",
+    },
+
+    # =========================================================================
+    # ROLLOUT
+    # =========================================================================
+    "rollout.enabled": {
+        "type": "bool",
+        "default": "false",
+        "unit": "value",
+    },
+    "rollout.min_profit_pct": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "0",
+        "unit": "pct",
+        "precision": 0,
+    },
+
+    # =========================================================================
+    # COST MODEL (IBKR commissions)
+    # =========================================================================
+    "cost_model.commission_per_contract": {
+        "type": "float",
+        "min": 0.0,
+        "max": 10.0,
+        "default": "0.65",
+        "unit": "value",
+        "precision": 2,
+    },
+    "cost_model.min_commission": {
+        "type": "float",
+        "min": 0.0,
+        "max": 100.0,
+        "default": "1.00",
+        "unit": "value",
+        "precision": 2,
     },
 
     # =========================================================================

@@ -17,6 +17,22 @@ from app.backtest.domain.strategy.base import StrategySpec
 from .models import Zone, Trend
 
 
+STRATEGY_BY_NAME: dict = {
+    "bull_put_spread":           bull_put_strategy,
+    "bear_call_spread":          bear_call_strategy,
+    "put_broken_wing_butterfly": neutral_broken_wing_strategy,
+    "bull_call_spread":          bull_call_spread_strategy,
+    "bear_put_spread":           bear_put_spread_strategy,
+    "long_straddle":             long_straddle_strategy,
+    "long_strangle":             long_strangle_strategy,
+    "iron_condor":               iron_condor_strategy,
+    "iron_butterfly":            iron_butterfly_strategy,
+    "calendar_spread":           calendar_spread_strategy,
+    "jade_lizard":               jade_lizard_strategy,
+    "reverse_jade_lizard":       reverse_jade_lizard_strategy,
+    "diagonal_spread":           diagonal_spread_strategy,
+}
+
 STRATEGY_MATRIX = {
     Zone.A: {
         Trend.UP:      [bull_call_spread_strategy],
@@ -75,6 +91,7 @@ def select_strategy(
         StrategySpec with size_multiplier applied, or no_trade if strategy is disabled
     """
     overrides = strategy_overrides or {}
+    zone_str = zone.value  # "A", "B", "C", "D"
     condition = trend
 
     if zone == Zone.C:
@@ -100,10 +117,10 @@ def select_strategy(
     if not candidates:
         return no_trade_strategy()
 
-    # Filter out disabled strategies before ranking
+    # Filter out disabled strategies before ranking (zone-specific enabled flag)
     enabled_candidates = [
         c for c in candidates
-        if overrides.get(c().name, {}).get("enabled", True)
+        if overrides.get(c().name, {}).get(zone_str, {}).get("enabled", True)
     ]
     if not enabled_candidates:
         return no_trade_strategy()
@@ -114,7 +131,7 @@ def select_strategy(
         spec = rank_strategies(enabled_candidates, zone, iv_rank, adx, trend_signal)
 
     base_size = calculate_position_size(entry_score)
-    strategy_cfg = overrides.get(spec.name, {})
+    strategy_cfg = overrides.get(spec.name, {}).get(zone_str, {})
     spec.size_multiplier = base_size * strategy_cfg.get("size_multiplier", 1.0)
     return spec
 

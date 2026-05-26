@@ -53,4 +53,9 @@ class DecisionLog(Base):
     execution_cost_score    : Mapped[float] = mapped_column(Float, nullable=True)
     capital_efficiency_score: Mapped[float] = mapped_column(Float, nullable=True)
 
+    # Leading indicators (L1 signals — term structure, credit spread, VVIX)
+    iv_term_slope_delta5    : Mapped[float] = mapped_column(Float, nullable=True)
+    credit_spread_delta5    : Mapped[float] = mapped_column(Float, nullable=True)
+    vvix_rank               : Mapped[float] = mapped_column(Float, nullable=True)
+
     created_at              : Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -1,5 +1,5 @@
 import { Table, Card, Tag } from "antd";
-import { StrategyPerformance } from "../../features/backtest/types";
+import { StrategyPerformance, ZonePerformance } from "../../features/backtest/types";
 import { fmt } from "../../utils/string";
 import { getStrategyMeta } from "../../utils/strategy";
 
@@ -7,10 +7,104 @@ interface PerformanceTableProps {
 	performances: StrategyPerformance[] | undefined;
 }
 
+const ZONE_COLOR: Record<string, string> = {
+	A: "blue", B: "orange", C: "green", D: "purple", UNKNOWN: "default",
+};
+
+const pnlColor = (v: number) => (v >= 0 ? "#3f8600" : "#cf1322");
+
 const PerformanceTable = ({ performances }: PerformanceTableProps) => {
 	if (!performances || performances.length === 0) {
 		return null;
 	}
+
+	const zoneColumns = [
+		{
+			title: "Zone",
+			key: "zone",
+			width: 70,
+			render: (_: unknown, row: { zone: string }) => (
+				<Tag color={ZONE_COLOR[row.zone] ?? "default"} style={{ fontWeight: 600 }}>
+					{row.zone}
+				</Tag>
+			),
+		},
+		{
+			title: "Count",
+			dataIndex: "count",
+			key: "count",
+			width: 60,
+			align: "center" as const,
+		},
+		{
+			title: "Win",
+			dataIndex: "winning",
+			key: "winning",
+			width: 50,
+			align: "center" as const,
+		},
+		{
+			title: "Lose",
+			dataIndex: "losing",
+			key: "losing",
+			width: 50,
+			align: "center" as const,
+		},
+		{
+			title: "Win Rate",
+			dataIndex: "win_rate",
+			key: "win_rate",
+			width: 85,
+			align: "center" as const,
+			render: (v: number) => fmt(v, true),
+		},
+		{
+			title: "Total P&L",
+			dataIndex: "total_pnl",
+			key: "total_pnl",
+			width: 110,
+			align: "right" as const,
+			render: (v: number) => <span style={{ color: pnlColor(v) }}>${v.toFixed(2)}</span>,
+		},
+		{
+			title: "Avg P&L",
+			dataIndex: "avg_pnl",
+			key: "avg_pnl",
+			width: 100,
+			align: "right" as const,
+			render: (v: number) => <span style={{ color: pnlColor(v) }}>${v.toFixed(2)}</span>,
+		},
+		{
+			title: "Avg Days",
+			dataIndex: "avg_holding_days",
+			key: "avg_holding_days",
+			width: 85,
+			align: "center" as const,
+			render: (v: number) => v.toFixed(1),
+		},
+	];
+
+	const expandedRowRender = (row: StrategyPerformance) => {
+		if (!row.zone_breakdown || Object.keys(row.zone_breakdown).length === 0) {
+			return <span className="text-xs text-gray-400 pl-4">Nessun dato per zona disponibile</span>;
+		}
+		const zoneData = Object.entries(row.zone_breakdown)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([zone, stats]: [string, ZonePerformance]) => ({ key: zone, zone, ...stats }));
+
+		return (
+			<div className="pl-8 py-1">
+				<Table
+					columns={zoneColumns}
+					dataSource={zoneData}
+					pagination={false}
+					size="small"
+					showHeader={true}
+					style={{ background: "transparent" }}
+				/>
+			</div>
+		);
+	};
 
 	const columns = [
 		{
@@ -72,9 +166,7 @@ const PerformanceTable = ({ performances }: PerformanceTableProps) => {
 			width: 120,
 			align: "right" as const,
 			render: (value: number) => (
-				<span style={{ color: value >= 0 ? "#3f8600" : "#cf1322" }}>
-					${value.toFixed(2)}
-				</span>
+				<span style={{ color: pnlColor(value) }}>${value.toFixed(2)}</span>
 			),
 		},
 		{
@@ -84,9 +176,7 @@ const PerformanceTable = ({ performances }: PerformanceTableProps) => {
 			width: 120,
 			align: "right" as const,
 			render: (value: number) => (
-				<span style={{ color: value >= 0 ? "#3f8600" : "#cf1322" }}>
-					${value.toFixed(2)}
-				</span>
+				<span style={{ color: pnlColor(value) }}>${value.toFixed(2)}</span>
 			),
 		},
 		{
@@ -108,13 +198,14 @@ const PerformanceTable = ({ performances }: PerformanceTableProps) => {
 		>
 			<Table
 				columns={columns}
-				dataSource={performances.map((p) => ({
-					...p,
-					key: p.strategy,
-				}))}
+				dataSource={performances.map((p) => ({ ...p, key: p.strategy }))}
 				pagination={false}
 				size="small"
-				// scroll={{ x: 1000 }}
+				expandable={{
+					expandedRowRender,
+					rowExpandable: (row) =>
+						!!row.zone_breakdown && Object.keys(row.zone_breakdown).length > 0,
+				}}
 			/>
 		</Card>
 	);

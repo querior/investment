@@ -80,6 +80,18 @@ def _migrate() -> None:
             ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS breakeven_score FLOAT;
             ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS execution_cost_score FLOAT;
             ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS capital_efficiency_score FLOAT;
+            -- Leading indicator columns on decision_logs
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS iv_term_slope_delta5 FLOAT;
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS credit_spread_delta5 FLOAT;
+            ALTER TABLE decision_logs ADD COLUMN IF NOT EXISTS vvix_rank FLOAT;
+            -- Leading indicators: VXVCLS (VIX3M) via FRED → macro_raw
+            INSERT INTO macro_indicators (ticker, source, description, frequency, is_active)
+            VALUES ('VXVCLS', 'FRED', 'CBOE S&P 500 3-Month Volatility Index (VIX3M)', 'DAILY', true)
+            ON CONFLICT (ticker) DO NOTHING;
+            -- Leading indicators: ^VVIX via yfinance → market_price
+            INSERT INTO market_symbols (symbol, description, source, asset_type, is_active)
+            VALUES ('^VVIX', 'CBOE Volatility of Volatility Index', 'YAHOO', 'ETF', true)
+            ON CONFLICT (symbol) DO NOTHING;
             -- Migrazione allocation_history: aggiunge id SERIAL come PK e run_id per isolamento backtest
             DO $$
             BEGIN

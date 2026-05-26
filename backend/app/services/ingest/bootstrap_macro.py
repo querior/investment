@@ -9,7 +9,7 @@ INDICATORS = [
 	"CUMFNS","GDPC1","INDPRO", "PPIACO", "EXPINF5YR",
 	"CPIAUCSL","T5YIE",
 	"FEDFUNDS","T10Y2Y",
-	"VIXCLS","BAA10Y",
+	"VIXCLS","VXVCLS","BAA10Y",
 ]
 
 def ingest_all_macro():

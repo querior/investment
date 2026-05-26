@@ -34,8 +34,17 @@ from app.backtest.data_preparation.base import prepare_market_df
 from app.backtest.data_preparation.pipeline import build_backtest_dataset
 from app.backtest.domain.option.ev import compute_trade_ev
 from app.engines.option import DecisionEngine
+from app.engines.option.strategy_selector import STRATEGY_BY_NAME
 
 logger = logging.getLogger(__name__)
+
+
+def _float_or_none(v) -> float | None:
+    try:
+        f = float(v)
+        return None if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return None
 
 
 def _scale_position(position, multiplier: float) -> None:
@@ -448,6 +457,7 @@ def run_eod_backtest(
     position_config: dict | None = None,
     risk_config: dict | None = None,
     strategy_overrides: dict | None = None,
+    rollout_config: dict | None = None,
 ) -> None:
     cleanup_eod_backtest_run(db, run.id)
 
@@ -478,7 +488,8 @@ def run_eod_backtest(
             
             new_positions_count = 0
             closed_positions_count = 0
-            
+            pending_rollouts: list[tuple[str, str, int]] = []
+
             # 1. update market sulle posizioni aperte
             for position in portfolio.positions:
                 if position.is_open:
@@ -514,7 +525,8 @@ def run_eod_backtest(
             # 3. close logic — merge global exit_config with per-strategy overrides
             _overrides = strategy_overrides or {}
             for position in portfolio.positions:
-                s_cfg = _overrides.get(position.name, {})
+                entry_zone = getattr(position, "entry_zone", "")
+                s_cfg = _overrides.get(position.name, {}).get(entry_zone, {})
                 pos_exit_config = dict(exit_config or {})
                 if s_cfg.get("profit_target_pct") is not None:
                     pos_exit_config["rule_profit_target"] = {
@@ -539,25 +551,47 @@ def run_eod_backtest(
                     row=row,
                     exit_config=pos_exit_config,
                 ))
+                # Load DB position before close so we can read entry_transaction_costs
+                db_position_id = position_ids.get(id(position))
+                db_position = db.get(BacktestPosition, db_position_id) if db_position_id else None
+
+                _entry_comm = 0.0
+                _exit_comm = 0.0
+
                 if position.is_open and should_exit:
                     exit_reason = exit_conditions.get("triggered_by") if exit_conditions else "unknown"
                     logger.warning(f"close position: {position.name} {position.opened_at} - reason: {exit_reason}")
-                    trade_pnls.append(position.pnl)
+
+                    if instrument is not None:
+                        _entry_comm = (db_position.entry_transaction_costs or 0.0) if db_position else 0.0
+                        _n_contracts = sum(leg.quantity for leg in position.legs)
+                        _exit_comm = instrument.cost_model.total_cost(abs(position.price), _n_contracts)
+
+                    net_pnl = position.pnl - _entry_comm - _exit_comm
+                    trade_pnls.append(net_pnl)
                     portfolio.close_position(position)
+                    portfolio.apply_commission(_entry_comm + _exit_comm)
                     closed_positions_count += 1
                     # Track the close date for this strategy (cooldown)
                     recent_closes[position.name] = date
 
-                db_position_id = position_ids.get(id(position))
-                if db_position_id is not None:
-                    db_position = db.get(BacktestPosition,db_position_id)
-                    if db_position:
-                        db_position.status = "CLOSED"
-                        db_position.closed_at = date
-                        db_position.close_value = position.price
-                        db_position.realized_pnl = position.pnl
-                        if exit_conditions:
-                            db_position.exit_conditions = exit_conditions
+                    # Queue rollout if enabled and position closed via DTE rule
+                    _rc = rollout_config or {}
+                    if _rc.get("enabled") and exit_reason == "dte":
+                        _min_pnl = float(_rc.get("min_profit_pct", 0)) / 100.0 * abs(position.initial_value)
+                        if net_pnl >= _min_pnl:
+                            _n_roll = position.legs[0].quantity if position.legs else 1
+                            pending_rollouts.append((position.name, getattr(position, "entry_zone", ""), _n_roll))
+                            logger.warning(f"[ROLLOUT QUEUED {date}] {position.name} zone={getattr(position, 'entry_zone', '')} net_pnl={net_pnl:.2f}")
+
+                if db_position is not None:
+                    db_position.status = "CLOSED"
+                    db_position.closed_at = date
+                    db_position.close_value = position.price
+                    db_position.realized_pnl = position.pnl - _entry_comm - _exit_comm
+                    db_position.exit_transaction_costs = _exit_comm if _exit_comm > 0 else None
+                    if exit_conditions:
+                        db_position.exit_conditions = exit_conditions
                 db.commit()
 
             portfolio.remove_closed_positions()
@@ -615,6 +649,86 @@ def run_eod_backtest(
                 run.max_consecutive_losses = int(mcl) if mcl is not None else None
                 run.n_trades = total_trades
                 db.commit()
+
+            # 4.5. process rollouts from DTE closes
+            for (roll_strat, roll_zone, roll_n_contracts) in pending_rollouts:
+                strat_factory = STRATEGY_BY_NAME.get(roll_strat)
+                if strat_factory is None:
+                    logger.warning(f"[ROLLOUT {date}] Unknown strategy {roll_strat}, skipping")
+                    continue
+                spec = strat_factory()
+                s_cfg = (strategy_overrides or {}).get(roll_strat, {}).get(roll_zone, {})
+                q = instrument.dividend_yield if instrument else 0.0
+                try:
+                    rolled = spec.builder(
+                        date=date,
+                        S=S,
+                        iv=iv,
+                        dte_days=45,
+                        quantity=roll_n_contracts,
+                        q=q,
+                        target_delta_short=s_cfg.get("delta_short", 0.16),
+                        target_delta_long=s_cfg.get("delta_long", 0.05),
+                        target_delta_long_call=s_cfg.get("delta_long_call", 0.10),
+                    )
+                except Exception as exc:
+                    logger.warning(f"[ROLLOUT {date}] Build failed for {roll_strat}: {exc}")
+                    continue
+                rolled.entry_zone = roll_zone
+
+                roll_ev = None
+                if instrument is not None:
+                    legs_for_roll_ev = [
+                        {
+                            "strike": leg.state.K,
+                            "type": leg.state.option_type,
+                            "position": "short" if leg.sign == -1 else "long",
+                            "qty": leg.quantity,
+                        }
+                        for leg in rolled.legs
+                    ]
+                    try:
+                        roll_ev = compute_trade_ev(
+                            legs=legs_for_roll_ev,
+                            S=S,
+                            T=45 / 365.0,
+                            r=0.03,
+                            sigma=iv,
+                            instrument=instrument,
+                        )
+                    except Exception:
+                        roll_ev = None
+
+                portfolio.open_position(rolled)
+                if roll_ev is not None:
+                    portfolio.apply_entry_commission(roll_ev.transaction_costs)
+
+                new_positions_count += 1
+                total_trades += 1
+
+                db_roll = BacktestPosition(
+                    run_id=run.id,
+                    position_type=roll_strat,
+                    status="OPEN",
+                    opened_at=date,
+                    entry_underlying=S,
+                    entry_iv=iv,
+                    entry_macro_regime=row.get("macro_regime"),
+                    initial_value=rolled.initial_value,
+                    entry_conditions={"rollout": True, "underlying_price": S, "iv": float(iv)},
+                    entry_fair_value=roll_ev.fair_value if roll_ev else None,
+                    entry_ev_gross=roll_ev.expected_value_gross if roll_ev else None,
+                    entry_ev_net=roll_ev.expected_value_net if roll_ev else None,
+                    entry_prob_profit=roll_ev.prob_profit if roll_ev else None,
+                    entry_transaction_costs=roll_ev.transaction_costs if roll_ev else None,
+                    entry_max_loss=roll_ev.max_loss if roll_ev else None,
+                    entry_max_profit=roll_ev.max_profit if roll_ev else None,
+                )
+                db.add(db_roll)
+                db.flush()
+                position_ids[id(rolled)] = db_roll.id
+                db.commit()
+                logger.warning(f"[ROLLOUT OPENED {date}] {roll_strat} zone={roll_zone} n_contracts={roll_n_contracts}")
 
             # 5. entry logic - only check when portfolio is empty
             has_open_positions = len([p for p in portfolio.positions if p.is_open]) > 0
@@ -684,6 +798,9 @@ def run_eod_backtest(
                     breakeven_score=ev.breakeven_score if ev else None,
                     execution_cost_score=ev.execution_cost_score if ev else None,
                     capital_efficiency_score=ev.capital_efficiency_score if ev else None,
+                    iv_term_slope_delta5=_float_or_none(row.get("iv_term_slope_delta5")),
+                    credit_spread_delta5=_float_or_none(row.get("credit_spread_delta5")),
+                    vvix_rank=_float_or_none(row.get("vvix_rank")),
                 )
                 db.add(decision_log)
                 db.commit()
@@ -708,7 +825,8 @@ def run_eod_backtest(
                 if should_open:
                     logger.warning(f"[ENTRY ACCEPT {date}] Opening position")
                     q = instrument.dividend_yield if instrument else 0.0
-                    s_cfg = (strategy_overrides or {}).get(strategy.name, {})
+                    _entry_zone = decision.zone or ""
+                    s_cfg = (strategy_overrides or {}).get(strategy.name, {}).get(_entry_zone, {})
                     new_position = strategy.builder(
                         date=date,
                         S=S,
@@ -720,6 +838,7 @@ def run_eod_backtest(
                         target_delta_long=s_cfg.get("delta_long", 0.05),
                         target_delta_long_call=s_cfg.get("delta_long_call", 0.10),
                     )
+                    new_position.entry_zone = _entry_zone
 
                     # Compute EV with qty=1 to get per-contract max_loss for risk check
                     trade_ev = None
@@ -788,6 +907,8 @@ def run_eod_backtest(
 
                     logger.warning(f"open position: {new_position.name} {new_position.opened_at}")
                     portfolio.open_position(new_position)
+                    if trade_ev is not None:
+                        portfolio.apply_entry_commission(trade_ev.transaction_costs)
 
                     position_type_key = new_position.name.lower().replace(" ", "_")
 
@@ -911,6 +1032,13 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
 
     logger.warning(f"[RUN {run.id}] Loading instrument config")
     instrument = get_instrument_config(db, ticker)
+    if instrument is not None:
+        comm_per_contract_p = params_dict.get("cost_model.commission_per_contract")
+        min_commission_p = params_dict.get("cost_model.min_commission")
+        if comm_per_contract_p:
+            instrument.cost_model.commission_per_contract = float(comm_per_contract_p["value"])
+        if min_commission_p:
+            instrument.cost_model.min_commission = float(min_commission_p["value"])
     logger.warning(f"[RUN {run.id}] Instrument loaded: {instrument}")
     logger.warning(f"[RUN {run.id}] Building exit config")
     exit_config = _build_exit_config(params_dict)
@@ -929,6 +1057,15 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
         except (json.JSONDecodeError, KeyError):
             logger.warning(f"[RUN {run.id}] strategy_config.overrides is not valid JSON, ignoring")
 
+    # Parse rollout config
+    rollout_config: dict = {}
+    rollout_enabled_p = params_dict.get("rollout.enabled")
+    if rollout_enabled_p and rollout_enabled_p["value"].lower() == "true":
+        rollout_config["enabled"] = True
+        rollout_min_p = params_dict.get("rollout.min_profit_pct")
+        if rollout_min_p:
+            rollout_config["min_profit_pct"] = float(rollout_min_p["value"])
+
     logger.warning(f"[RUN {run.id}] Starting EOD backtest execution with {len(df)} data points")
     run_eod_backtest(
         db,
@@ -942,6 +1079,7 @@ def execute_eod_backtest(db: Session, run: BacktestRun) -> None:
         position_config=position_config,
         risk_config=risk_config,
         strategy_overrides=strategy_overrides,
+        rollout_config=rollout_config,
     )
     logger.warning(f"[RUN {run.id}] EOD backtest execution completed")
 

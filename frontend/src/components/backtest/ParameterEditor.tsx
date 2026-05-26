@@ -25,6 +25,7 @@ import type {
 	BacktestRunDto,
 	BacktestConfigDto,
 } from "../../features/backtest/types";
+import { getStrategyMeta } from "../../utils/strategy";
 
 interface ParameterEditorProps {
 	currentRun: BacktestRunDto;
@@ -241,6 +242,21 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 			label: "Weight: Volume Ratio",
 			description: "Weight for volume ratio component in entry score (0-1).",
 		},
+		"entry_score.w7_term_structure": {
+			label: "Weight: IV Term Structure",
+			description:
+				"Weight for IV term slope direction (VIXCLS/VXVCLS delta). Negative delta = stress resolving = higher score.",
+		},
+		"entry_score.w8_credit_spread": {
+			label: "Weight: Credit Spread",
+			description:
+				"Weight for BAA10Y 5-day delta. Tightening spread = stress resolving = higher score.",
+		},
+		"entry_score.w9_vvix": {
+			label: "Weight: VVIX Rank",
+			description:
+				"Weight for VVIX 252-day percentile rank. Lower rank = calmer IV uncertainty = higher score.",
+		},
 
 		// Entry Sizing
 		"entry_size.threshold_full": {
@@ -355,6 +371,30 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 				"Bypassa il threshold L5 e apre ogni candidato valido. Modalità raccomandata fino alla ricalibratura dei pesi opportunity score (Sprint 3). Con false, L5 tende a filtrare le credit strategies per bias strutturale nel R/R score.",
 		},
 
+		// Rollout
+		"rollout.enabled": {
+			label: "Enable Rollout",
+			description:
+				"When a position exits via DTE rule, reopen the same strategy on the next expiration instead of waiting for the next entry signal.",
+		},
+		"rollout.min_profit_pct": {
+			label: "Min Profit to Roll (%)",
+			description:
+				"Only roll positions that closed with a profit >= X% of initial credit. 0 = always roll.",
+		},
+
+		// Cost Model (IBKR commissions)
+		"cost_model.commission_per_contract": {
+			label: "Commission per Contract",
+			description:
+				"IBKR fee per option contract per leg ($). Default: $0.65 (IBKR Fixed pricing).",
+		},
+		"cost_model.min_commission": {
+			label: "Min Commission per Order",
+			description:
+				"Minimum commission per order ($). Default: $1.00 (IBKR Fixed pricing).",
+		},
+
 		// Execution
 		entry_every_n_days: {
 			label: "Entry Every N Days",
@@ -439,7 +479,7 @@ const STRATEGY_SECTIONS = [
 
 const SCORING_SECTIONS = [
 	{
-		title: "L4 — Entry Score Weights",
+		title: "L4 — Entry Score Weights (Trailing)",
 		params: [
 			"entry_score.w1_iv_rank",
 			"entry_score.w2_iv_hv",
@@ -447,6 +487,14 @@ const SCORING_SECTIONS = [
 			"entry_score.w4_rsi",
 			"entry_score.w5_dte",
 			"entry_score.w6_volume",
+		],
+	},
+	{
+		title: "L4 — Entry Score Weights (Leading)",
+		params: [
+			"entry_score.w7_term_structure",
+			"entry_score.w8_credit_spread",
+			"entry_score.w9_vvix",
 		],
 	},
 	{
@@ -485,6 +533,8 @@ const SIZING_PARAMS = [
 	"entry_size.multiplier_reduced",
 ];
 
+const ROLLOUT_PARAMS = ["rollout.enabled", "rollout.min_profit_pct"];
+
 // Profit target, stop loss e DTE exit sono ora configurati per-strategia nel tab Strategie.
 const EXIT_PARAMS = [
 	"exit.rule_trailing_stop.enabled",
@@ -499,6 +549,11 @@ const EXIT_PARAMS = [
 	"exit.rule_delta_breach.threshold",
 	"exit.rule_theta_decay.enabled",
 	"exit.rule_theta_decay.threshold_ratio",
+];
+
+const COST_MODEL_PARAMS = [
+	"cost_model.commission_per_contract",
+	"cost_model.min_commission",
 ];
 
 const SYSTEM_SECTIONS = [
@@ -543,31 +598,47 @@ const STRATEGY_META: Record<string, { label: string; zone: string }> = {
 	bear_put_spread:     { label: "Bear Put Spread",      zone: "A" },
 	long_straddle:       { label: "Long Straddle",        zone: "C" },
 	long_strangle:       { label: "Long Strangle",        zone: "C" },
-	neutral_broken_wing: { label: "Neutral Broken Wing",  zone: "A/C" },
-	jade_lizard:         { label: "Jade Lizard",          zone: "B" },
+	put_broken_wing_butterfly: { label: "Put Broken Wing",  zone: "A/C" },
+	jade_lizard:         { label: "Jade Lizard",          zone: "B/D" },
 	reverse_jade_lizard: { label: "Reverse Jade Lizard",  zone: "B" },
 	calendar_spread:     { label: "Calendar Spread",      zone: "D" },
 	diagonal_spread:     { label: "Diagonal Spread",      zone: "D" },
 };
 
 const ZONE_COLOR: Record<string, string> = {
-	A: "blue", B: "orange", C: "green", D: "purple", "A/C": "cyan",
+	A: "blue", B: "orange", C: "green", D: "purple", "A/C": "cyan", "B/D": "gold",
 };
 
-const DEFAULT_STRATEGY_CONFIG: Record<string, StrategyConfig> = {
-	bull_put_spread:     { enabled: true, delta_short: 0.20, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
-	bear_call_spread:    { enabled: true, delta_short: 0.20, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
-	iron_condor:         { enabled: true, delta_short: 0.10, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 40,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
-	iron_butterfly:      { enabled: true, delta_short: 0.50, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 25,  stop_loss_pct: 200, dte_exit_days: 14, size_multiplier: 0.7 },
-	bull_call_spread:    { enabled: true, delta_short: 0.10, delta_long: 0.30, delta_long_call: 0.30, profit_target_pct: 60,  stop_loss_pct: 100, dte_exit_days: 21, size_multiplier: 1.0 },
-	bear_put_spread:     { enabled: true, delta_short: 0.10, delta_long: 0.30, delta_long_call: 0.10, profit_target_pct: 60,  stop_loss_pct: 100, dte_exit_days: 21, size_multiplier: 1.0 },
-	long_straddle:       { enabled: true, delta_short: 0.50, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 100, stop_loss_pct: 50,  dte_exit_days: 30, size_multiplier: 0.8 },
-	long_strangle:       { enabled: true, delta_short: 0.30, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 100, stop_loss_pct: 50,  dte_exit_days: 30, size_multiplier: 0.8 },
-	neutral_broken_wing: { enabled: true, delta_short: 0.15, delta_long: 0.05, delta_long_call: 0.05, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
-	jade_lizard:         { enabled: true, delta_short: 0.20, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
-	reverse_jade_lizard: { enabled: true, delta_short: 0.20, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 },
-	calendar_spread:     { enabled: true, delta_short: 0.40, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 50,  stop_loss_pct: 100, dte_exit_days: 7,  size_multiplier: 0.8 },
-	diagonal_spread:     { enabled: true, delta_short: 0.30, delta_long: 0.15, delta_long_call: 0.15, profit_target_pct: 50,  stop_loss_pct: 100, dte_exit_days: 14, size_multiplier: 0.8 },
+const ZONES = ["A", "B", "C", "D"] as const;
+type ZoneKey = typeof ZONES[number];
+
+const ZONE_LABELS: Record<ZoneKey, string> = {
+	A: "Direzionale / Debit",
+	B: "Credit Spread",
+	C: "Long Volatilità",
+	D: "Neutrale / Range",
+};
+
+function _makeZoneCfg(enabledIn: ZoneKey[], base: Omit<StrategyConfig, "enabled">): Record<ZoneKey, StrategyConfig> {
+	return Object.fromEntries(
+		ZONES.map(z => [z, { ...base, enabled: enabledIn.includes(z) }])
+	) as Record<ZoneKey, StrategyConfig>;
+}
+
+const DEFAULT_STRATEGY_CONFIG: Record<string, Record<ZoneKey, StrategyConfig>> = {
+	bull_put_spread:     _makeZoneCfg(["B"],         { delta_short: 0.20, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 }),
+	bear_call_spread:    _makeZoneCfg(["B"],         { delta_short: 0.20, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 }),
+	iron_condor:         _makeZoneCfg(["D"],         { delta_short: 0.10, delta_long: 0.05, delta_long_call: 0.10, profit_target_pct: 40,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 }),
+	iron_butterfly:      _makeZoneCfg(["D"],         { delta_short: 0.50, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 25,  stop_loss_pct: 200, dte_exit_days: 14, size_multiplier: 0.7 }),
+	bull_call_spread:    _makeZoneCfg(["A"],         { delta_short: 0.10, delta_long: 0.30, delta_long_call: 0.30, profit_target_pct: 60,  stop_loss_pct: 100, dte_exit_days: 21, size_multiplier: 1.0 }),
+	bear_put_spread:     _makeZoneCfg(["A"],         { delta_short: 0.10, delta_long: 0.30, delta_long_call: 0.10, profit_target_pct: 60,  stop_loss_pct: 100, dte_exit_days: 21, size_multiplier: 1.0 }),
+	long_straddle:       _makeZoneCfg(["C"],         { delta_short: 0.50, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 100, stop_loss_pct: 50,  dte_exit_days: 30, size_multiplier: 0.8 }),
+	long_strangle:       _makeZoneCfg(["C"],         { delta_short: 0.30, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 100, stop_loss_pct: 50,  dte_exit_days: 30, size_multiplier: 0.8 }),
+	put_broken_wing_butterfly: _makeZoneCfg(["A", "C"],   { delta_short: 0.15, delta_long: 0.05, delta_long_call: 0.05, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 }),
+	jade_lizard:         _makeZoneCfg(["B", "D"],   { delta_short: 0.20, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 }),
+	reverse_jade_lizard: _makeZoneCfg(["B"],         { delta_short: 0.20, delta_long: 0.10, delta_long_call: 0.10, profit_target_pct: 50,  stop_loss_pct: 200, dte_exit_days: 21, size_multiplier: 1.0 }),
+	calendar_spread:     _makeZoneCfg(["D"],         { delta_short: 0.40, delta_long: 0.00, delta_long_call: 0.00, profit_target_pct: 50,  stop_loss_pct: 100, dte_exit_days: 7,  size_multiplier: 0.8 }),
+	diagonal_spread:     _makeZoneCfg(["D"],         { delta_short: 0.30, delta_long: 0.15, delta_long_call: 0.15, profit_target_pct: 50,  stop_loss_pct: 100, dte_exit_days: 14, size_multiplier: 0.8 }),
 };
 
 export default function ParameterEditor({
@@ -591,23 +662,35 @@ export default function ParameterEditor({
 		return initial;
 	});
 
-	const [strategyDraft, setStrategyDraft] = useState<Record<string, StrategyConfig>>(() => {
+	const [strategyDraft, setStrategyDraft] = useState<Record<string, Record<string, StrategyConfig>>>(() => {
 		const raw = currentRun?.parameters?.["strategy_config.overrides"];
 		const jsonStr = typeof raw === "string" ? raw : (raw as any)?.value;
 		if (jsonStr) {
-			try { return { ...DEFAULT_STRATEGY_CONFIG, ...JSON.parse(jsonStr) }; } catch {}
+			try {
+				const parsed = JSON.parse(jsonStr);
+				// Detect old flat format (not zone-keyed): first strategy value has top-level "enabled"
+				const firstVal = Object.values(parsed)[0] as any;
+				if (firstVal && typeof firstVal.enabled !== "undefined") {
+					return DEFAULT_STRATEGY_CONFIG;
+				}
+				return { ...DEFAULT_STRATEGY_CONFIG, ...parsed };
+			} catch {}
 		}
 		return DEFAULT_STRATEGY_CONFIG;
 	});
 
 	const updateStrategyField = (
+		zone: string,
 		strategy: string,
 		field: keyof StrategyConfig,
 		value: boolean | number,
 	) => {
 		setStrategyDraft((prev) => ({
 			...prev,
-			[strategy]: { ...prev[strategy], [field]: value },
+			[strategy]: {
+				...prev[strategy],
+				[zone]: { ...prev[strategy]?.[zone], [field]: value },
+			},
 		}));
 	};
 
@@ -651,6 +734,10 @@ export default function ParameterEditor({
 
 	const PARAM_TYPE_OVERRIDES: Record<string, Partial<ParameterSchema>> = {
 		"debug.force_open": { type: "bool", default: "false" },
+		"cost_model.commission_per_contract": { type: "float", default: "0.65" },
+		"cost_model.min_commission": { type: "float", default: "1.00" },
+		"rollout.enabled": { type: "bool", default: "false" },
+		"rollout.min_profit_pct": { type: "float", default: "0" },
 	};
 
 	const renderField = (paramKey: string) => {
@@ -817,13 +904,13 @@ export default function ParameterEditor({
 		{ field: "dte_exit_days"     as const, label: "DTE Exit (days)", min: 1, max: 90,   step: 1,  prec: 0 },
 	];
 
-	const renderStrategyFields = (key: string, cfg: StrategyConfig, fields: typeof ENTRY_FIELDS | typeof EXIT_FIELDS) =>
+	const renderStrategyFields = (zone: string, key: string, cfg: StrategyConfig, fields: typeof ENTRY_FIELDS | typeof EXIT_FIELDS) =>
 		fields.map(({ field, label, min, max, step, prec }) => (
 			<Form.Item key={field} label={label} style={{ marginBottom: 4 }}>
 				<InputNumber
 					size="small"
 					value={cfg[field] as number}
-					onChange={(v) => updateStrategyField(key, field, v ?? 0)}
+					onChange={(v) => updateStrategyField(zone, key, field, v ?? 0)}
 					min={min}
 					max={max}
 					step={step}
@@ -834,54 +921,73 @@ export default function ParameterEditor({
 			</Form.Item>
 		));
 
-	const renderStrategyAccordion = () => {
+	const renderStrategiesForZone = (zone: ZoneKey) => {
 		const items = Object.entries(STRATEGY_META).map(([key, meta]) => {
-			const cfg = strategyDraft[key] ?? DEFAULT_STRATEGY_CONFIG[key];
+			const cfg = strategyDraft[key]?.[zone] ?? DEFAULT_STRATEGY_CONFIG[key]?.[zone];
+			if (!cfg) return null;
 			return {
 				key,
-				label: (
-					<div className="flex items-center gap-2 w-full pr-2">
-						<Switch
-							size="small"
-							checked={cfg.enabled}
-							onChange={(v) => updateStrategyField(key, "enabled", v)}
-						/>
-						<span className={cfg.enabled ? "font-medium" : "text-gray-400"}>
-							{meta.label}
-						</span>
-						<Tag
-							color={ZONE_COLOR[meta.zone] ?? "default"}
-							style={{ marginLeft: "auto", fontSize: 10 }}
-						>
-							Zone {meta.zone}
-						</Tag>
-					</div>
-				),
+				label: (() => {
+					const sm = getStrategyMeta(key);
+					return (
+						<div className="flex items-center gap-2 w-full pr-2">
+							<Switch
+								size="small"
+								checked={cfg.enabled}
+								onChange={(v) => updateStrategyField(zone, key, "enabled", v)}
+							/>
+							<span className={cfg.enabled ? "font-medium" : "text-gray-400"}>
+								{meta.label}
+							</span>
+							{sm && (
+								<Tag color={sm.color} style={{ fontSize: 10 }}>
+									{sm.acronym}
+								</Tag>
+							)}
+						</div>
+					);
+				})(),
 				children: (
 					<div>
 						<div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Entry</div>
 						<div className="grid grid-cols-2 gap-x-4 gap-y-1">
-							{renderStrategyFields(key, cfg, ENTRY_FIELDS)}
+							{renderStrategyFields(zone, key, cfg, ENTRY_FIELDS)}
 						</div>
 						<Divider style={{ margin: "10px 0" }} />
 						<div className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-2">Exit</div>
 						<div className="grid grid-cols-2 gap-x-4 gap-y-1">
-							{renderStrategyFields(key, cfg, EXIT_FIELDS)}
+							{renderStrategyFields(zone, key, cfg, EXIT_FIELDS)}
 						</div>
 					</div>
 				),
 			};
-		});
+		}).filter(Boolean);
+
+		return (
+			<Collapse size="small" collapsible="icon" items={items as any} ghost />
+		);
+	};
+
+	const renderStrategyAccordion = () => {
+		const tabItems = ZONES.map(zone => ({
+			key: zone,
+			label: (
+				<span className="flex items-center gap-1">
+					<Tag color={ZONE_COLOR[zone]} style={{ margin: 0, fontSize: 11 }}>{zone}</Tag>
+					<span className="text-xs text-gray-500 hidden sm:inline">{ZONE_LABELS[zone]}</span>
+				</span>
+			),
+			children: (
+				<div style={{ paddingTop: 4 }}>
+					{renderStrategiesForZone(zone)}
+				</div>
+			),
+		}));
 
 		return (
 			<div style={{ paddingTop: 8 }}>
-				<Collapse
-					size="small"
-					collapsible="icon"
-					items={items}
-					ghost
-				/>
-				<div className="flex justify-end mt-3">
+				<Tabs size="small" items={tabItems} />
+				<div className="flex justify-end mt-2">
 					<Button
 						size="small"
 						type="primary"
@@ -1014,11 +1120,20 @@ export default function ParameterEditor({
 							key: "sizing",
 							label: "Sizing",
 							children: (
-								<div
-									className="grid grid-cols-2 gap-2"
-									style={{ paddingTop: 12 }}
-								>
-									{SIZING_PARAMS.map(renderField)}
+								<div style={{ paddingTop: 12 }}>
+									<div className="grid grid-cols-2 gap-2">
+										{SIZING_PARAMS.map(renderField)}
+									</div>
+									<Divider
+										orientation="left"
+										orientationMargin={0}
+										style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 8 }}
+									>
+										Commissioni (IBKR)
+									</Divider>
+									<div className="grid grid-cols-2 gap-2">
+										{COST_MODEL_PARAMS.map(renderField)}
+									</div>
 								</div>
 							),
 						},
@@ -1026,11 +1141,20 @@ export default function ParameterEditor({
 							key: "exit",
 							label: "Exit",
 							children: (
-								<div
-									className="grid grid-cols-2 gap-2"
-									style={{ paddingTop: 12 }}
-								>
-									{EXIT_PARAMS.map(renderField)}
+								<div style={{ paddingTop: 12 }}>
+									<div className="grid grid-cols-2 gap-2">
+										{EXIT_PARAMS.map(renderField)}
+									</div>
+									<Divider
+										orientation="left"
+										orientationMargin={0}
+										style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 8 }}
+									>
+										Rollout
+									</Divider>
+									<div className="grid grid-cols-2 gap-2">
+										{ROLLOUT_PARAMS.map(renderField)}
+									</div>
 								</div>
 							),
 						},

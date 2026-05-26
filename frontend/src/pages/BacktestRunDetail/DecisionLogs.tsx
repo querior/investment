@@ -129,6 +129,39 @@ const DecisionLogsViewer: React.FC = () => {
 			render: (value: number | null) => value != null ? value.toFixed(1) : "—",
 		},
 		{
+			title: "Term Δ",
+			dataIndex: "iv_term_slope_delta5",
+			key: "iv_term_slope_delta5",
+			width: 80,
+			render: (value: number | null) => {
+				if (value == null) return <span className="text-gray-300">—</span>;
+				const color = value < 0 ? "#10b981" : value > 0 ? "#ef4444" : undefined;
+				return <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{value >= 0 ? "+" : ""}{value.toFixed(3)}</span>;
+			},
+		},
+		{
+			title: "Credit Δ",
+			dataIndex: "credit_spread_delta5",
+			key: "credit_spread_delta5",
+			width: 80,
+			render: (value: number | null) => {
+				if (value == null) return <span className="text-gray-300">—</span>;
+				const color = value < 0 ? "#10b981" : value > 0 ? "#ef4444" : undefined;
+				return <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{value >= 0 ? "+" : ""}{value.toFixed(2)}</span>;
+			},
+		},
+		{
+			title: "VVIX %",
+			dataIndex: "vvix_rank",
+			key: "vvix_rank",
+			width: 75,
+			render: (value: number | null) => {
+				if (value == null) return <span className="text-gray-300">—</span>;
+				const color = value > 70 ? "#ef4444" : value < 30 ? "#10b981" : undefined;
+				return <span style={{ color }}>{value.toFixed(0)}</span>;
+			},
+		},
+		{
 			title: "Decision",
 			dataIndex: "decision_action",
 			key: "decision_action",

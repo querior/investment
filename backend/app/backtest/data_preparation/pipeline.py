@@ -8,6 +8,7 @@ from app.backtest.data_preparation.momentum import add_momentum_features
 from app.backtest.data_preparation.range import add_range_features
 from app.backtest.data_preparation.squeeze import add_ttm_squeeze, add_volume_metrics
 from app.backtest.data_preparation.macro import add_macro_features
+from app.backtest.data_preparation.leads import add_leading_indicators
 from app.backtest.domain.strategy.entry_scoring import calculate_entry_score
 
 
@@ -92,6 +93,9 @@ def build_backtest_dataset(df: pd.DataFrame, db, params_dict: dict, run, entry_c
 
     # --- 7. Macro features ---
     df = add_macro_features(df, db)
+
+    # --- 7b. Leading indicators (term structure, credit spread, VVIX) ---
+    df = add_leading_indicators(df, db)
 
     # --- 8. Entry score per row (uses all indicators computed above) ---
     _entry_config = entry_config or {}
