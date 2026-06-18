@@ -183,10 +183,85 @@ Gestisce i trasferimenti tra layer (flusso bottom-up):
 Il Long è il layer terminale — accumula ma non redistribuisce verso il basso.
 Non è previsto flusso inverso in condizioni normali.
 
+## Architettura evolutiva
+
+### Principi
+Il sistema è costruito su tre principi che si rafforzano a vicenda:
+1. **Pipeline** — stage componibili con input/output espliciti
+2. **Agenti** — logica decisionale incapsulata con interfaccia `observe / decide / act`
+3. **ML/DL** — ogni `decide()` è un punto di sostituzione con un modello appreso
+
+### Interfacce fondamentali
+
+```python
+# Stage della pipeline: trasforma lo stato del backtest
+class PipelineStage(Protocol):
+    def run(self, state: BacktestState) -> BacktestState: ...
+
+# Agente decisionale: osserva → decide → agisce
+class Agent(Protocol):
+    def observe(self, state: BacktestState) -> dict: ...
+    def decide(self, features: dict) -> Signal: ...
+
+# Identità di ogni componente nel sistema
+@dataclass
+class LayerContext:
+    layer: Literal["short", "medium", "long"]
+    market: str       # "options", "equities", "futures"
+    instrument: str   # "SPY", "QQQ", ...
+    timeframe: str    # "daily", "weekly", "monthly"
+```
+
+Il `LayerContext` è il tag che permette al `GlobalOrchestrator` (futuro) di coordinare i layer senza refactoring.
+
+### Gerarchia degli agenti (layer Short)
+
+```
+BacktestEngine  ← driver del tempo, nessuna logica di investimento
+    │
+    ▼
+PortfolioAgent  ← conosce: cash, posizioni aperte, drawdown, limiti
+    │            ← arbittra conflitti, applica veto, coordina rollout
+    ├── StrategyAgent[BCS]   ← locale, ignaro del portfolio
+    ├── StrategyAgent[BPS]
+    ├── StrategyAgent[IC]
+    └── ...
+    │
+    └── ExitAgent  ← decide quando chiudere / rollare (punto 3)
+                   ← primo candidato ML: reward = P&L finale del trade
+```
+
+### Mappatura pipeline → codice esistente
+
+| Stage | File attuale | Ruolo |
+|---|---|---|
+| `DataStage` | `pipeline.py` (step 1-6) | OHLCV, IV, indicatori tecnici |
+| `FeatureStage` | `leads.py` (step 7b) | VVIX, term slope, credit spread |
+| `ScoringStage` | `entry_scoring.py` | Entry score composito w1-w9 |
+| `DecisionStage` | `engines/option/` (L1-L5) | Zone → Strategia → Pricing → Score → Decision |
+| `ExecutionStage` | `runs.py` | Apre/chiude posizioni, commissioni |
+| `ObservabilityStage` | `decision_log.py` | Scrive log per ogni segnale |
+
+Il codice esistente non va riscritto: va **avvolto** nelle interfacce sopra. Il comportamento non cambia, la struttura diventa esplicita.
+
+### Pipeline specializzate per dominio
+
+Una pipeline non è un codebase separato — è una configurazione di stage:
+
+```python
+ShortLayerPipeline(
+    context=LayerContext(layer="short", market="options", instrument="SPY", timeframe="daily"),
+    stages=[DataStage, FeatureStage, ScoringStage, DecisionStage, ExecutionStage, ObservabilityStage]
+)
+```
+
+Quando si aggiunge un nuovo strumento (es. futures) si crea una nuova configurazione, non si duplica il codice.
+
 ## Decisioni architetturali aperte
 - [ ] Come gestire la sincronizzazione dei layer (event-driven vs scheduled?)
 - [ ] Soglie di trasferimento capital bus: fisse o dinamiche?
 - [ ] Layer Medium: strategia income da definire
+- [ ] GlobalOrchestrator: da costruire quando almeno due layer sono attivi
 
 ## Decisioni prese
 Vedi `docs/decisions/` per i dettagli.

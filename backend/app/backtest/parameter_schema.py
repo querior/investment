@@ -324,6 +324,23 @@ PARAMETER_SCHEMA: dict[str, ParameterDef] = {
     },
 
     # =========================================================================
+    # EXIT PARAMETERS — Portfolio Trailing Stop
+    # =========================================================================
+    "exit.portfolio_trailing_stop.enabled": {
+        "type": "bool",
+        "default": "false",
+        "unit": "value",
+    },
+    "exit.portfolio_trailing_stop.pullback_pct": {
+        "type": "float",
+        "min": 5.0,
+        "max": 50.0,
+        "default": "20",
+        "unit": "pct",
+        "precision": 0,
+    },
+
+    # =========================================================================
     # EXIT PARAMETERS — Macro Reversal Rule
     # =========================================================================
     "exit.rule_macro_reversal.enabled": {

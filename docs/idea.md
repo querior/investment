@@ -79,6 +79,36 @@ documentato su ogni layer con rischio controllato e sizing appropriato.
 L'automazione è uno strumento, non il fine — ogni strategia automatizzata deve
 essere prima compresa e validata manualmente.
 
+## Principi di evoluzione architetturale
+
+Il sistema è progettato per evolvere in modo naturale su tre assi:
+
+### 1. Pipeline
+Ogni layer è una sequenza di stage componibili: `DataStage → FeatureStage → ScoringStage → DecisionStage → ExecutionStage → MetricsStage`.
+Ogni stage ha input/output espliciti. Il comportamento si cambia sostituendo un singolo stage, non riscrivendo il sistema.
+Pipeline specializzate per dominio: ogni combinazione market/strumento/timeframe è una configurazione di stage, non un codebase separato.
+
+### 2. Agenti
+La logica decisionale è incapsulata in agenti con interfaccia `observe / decide / act`.
+Il `PortfolioAgent` coordina gli agenti-strategia: applica i vincoli di capitale, arbittra i conflitti, autorizza le azioni.
+Ogni `StrategyAgent` è locale e ignaro del portfolio — produce solo segnali con un punteggio.
+Questa struttura prepara il terreno per il Reinforcement Learning: ogni `decide()` è un punto di sostituzione.
+
+### 3. ML e Deep Learning
+I pesi fissi (w1-w9, L1-L5) vengono progressivamente sostituiti da modelli appresi.
+Il primo candidato naturale è l'`ExitAgent` (quando chiudere / quando rollare): ha un reward chiaro (P&L finale) e uno stato osservabile (Greeks, DTE, regime).
+Progressione prevista: rule-based → ML classifier → RL policy.
+
+### Visione a regime
+```
+GlobalOrchestrator
+    ├── ShortLayer    ← pipeline options/equities/daily    (attivo)
+    ├── MediumLayer   ← pipeline bonds/dividends/monthly   (futuro)
+    └── LongLayer     ← pipeline macro/ETF/quarterly       (futuro)
+```
+Ogni layer è autonomo. Il `GlobalOrchestrator` gestisce solo il flusso di capitale tra layer
+e i segnali cross-layer (es. regime macro dal Long che informa lo Short).
+
 ## Fuori scope (per ora)
 - Criptovalute
 - Forex

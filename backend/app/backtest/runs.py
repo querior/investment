@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import Any, cast
 import pandas as pd
 import logging
-from app.backtest.domain.strategy.exit_context import ExitContext
-from app.backtest.domain.strategy.exit_rules import should_close
+from app.backtest.domain.agents.exit_agent import ExitAgent
 from app.backtest.schemas.backtest_portfolio_performance import BacktestPortfolioPerformance
 from app.backtest.schemas.backtest_position import BacktestPosition
 from app.backtest.schemas.backtest_position_snapshot import BacktestPositionSnapshot
@@ -111,6 +110,10 @@ def _build_exit_config(params_dict: dict) -> dict:
         "rule_theta_decay": {
             "enabled": _bool("exit.rule_theta_decay.enabled", False),
             "threshold_ratio": float(_get("exit.rule_theta_decay.threshold_ratio", "0.05")),
+        },
+        "portfolio_trailing_stop": {
+            "enabled": _bool("exit.portfolio_trailing_stop.enabled", False),
+            "pullback_pct": float(_get("exit.portfolio_trailing_stop.pullback_pct", "20")),
         },
     }
 
@@ -472,6 +475,12 @@ def run_eod_backtest(
 
     try:
         portfolio = Portfolio(initial_cash=initial_cash)
+        exit_agent = ExitAgent(
+            exit_config=exit_config or {},
+            strategy_overrides=strategy_overrides,
+            rollout_config=rollout_config,
+            portfolio_trailing_stop=(exit_config or {}).get("portfolio_trailing_stop", {}),
+        )
         position_ids: dict[int,int] = {}
 
         nav_series: list[float] = []
@@ -522,76 +531,52 @@ def run_eod_backtest(
                 db.add(pos_snapshot)
                 db.commit()
 
-            # 3. close logic — merge global exit_config with per-strategy overrides
-            _overrides = strategy_overrides or {}
+            # 3. close logic — ExitAgent decides HOLD / CLOSE / ROLL per position
+            exit_agent.update_portfolio_peak(portfolio.total_equity)
+
             for position in portfolio.positions:
-                entry_zone = getattr(position, "entry_zone", "")
-                s_cfg = _overrides.get(position.name, {}).get(entry_zone, {})
-                pos_exit_config = dict(exit_config or {})
-                if s_cfg.get("profit_target_pct") is not None:
-                    pos_exit_config["rule_profit_target"] = {
-                        **pos_exit_config.get("rule_profit_target", {}),
-                        "threshold_pct": float(s_cfg["profit_target_pct"]),
-                        "enabled": True,
-                    }
-                if s_cfg.get("stop_loss_pct") is not None:
-                    pos_exit_config["rule_stop_loss"] = {
-                        **pos_exit_config.get("rule_stop_loss", {}),
-                        "threshold_pct": float(s_cfg["stop_loss_pct"]),
-                        "enabled": True,
-                    }
-                if s_cfg.get("dte_exit_days") is not None:
-                    pos_exit_config["rule_dte"] = {
-                        **pos_exit_config.get("rule_dte", {}),
-                        "threshold_days": float(s_cfg["dte_exit_days"]),
-                        "enabled": True,
-                    }
-                should_exit, exit_conditions = should_close(ExitContext(
-                    position=position,
-                    row=row,
-                    exit_config=pos_exit_config,
-                ))
-                # Load DB position before close so we can read entry_transaction_costs
+                if not position.is_open:
+                    continue
+
+                signal = exit_agent.decide(position=position, row=row, portfolio=portfolio)
+
+                if signal.action == "HOLD":
+                    continue
+
                 db_position_id = position_ids.get(id(position))
                 db_position = db.get(BacktestPosition, db_position_id) if db_position_id else None
+
+                exit_reason = signal.triggered_by
+                logger.warning(f"close position: {position.name} {position.opened_at} - reason: {exit_reason} action: {signal.action}")
 
                 _entry_comm = 0.0
                 _exit_comm = 0.0
 
-                if position.is_open and should_exit:
-                    exit_reason = exit_conditions.get("triggered_by") if exit_conditions else "unknown"
-                    logger.warning(f"close position: {position.name} {position.opened_at} - reason: {exit_reason}")
+                if instrument is not None:
+                    _entry_comm = (db_position.entry_transaction_costs or 0.0) if db_position else 0.0
+                    _n_contracts = sum(leg.quantity for leg in position.legs)
+                    _exit_comm = instrument.cost_model.total_cost(abs(position.price), _n_contracts)
 
-                    if instrument is not None:
-                        _entry_comm = (db_position.entry_transaction_costs or 0.0) if db_position else 0.0
-                        _n_contracts = sum(leg.quantity for leg in position.legs)
-                        _exit_comm = instrument.cost_model.total_cost(abs(position.price), _n_contracts)
+                net_pnl = position.pnl - _entry_comm - _exit_comm
+                trade_pnls.append(net_pnl)
+                portfolio.close_position(position)
+                portfolio.apply_commission(_entry_comm + _exit_comm)
+                closed_positions_count += 1
+                recent_closes[position.name] = date
 
-                    net_pnl = position.pnl - _entry_comm - _exit_comm
-                    trade_pnls.append(net_pnl)
-                    portfolio.close_position(position)
-                    portfolio.apply_commission(_entry_comm + _exit_comm)
-                    closed_positions_count += 1
-                    # Track the close date for this strategy (cooldown)
-                    recent_closes[position.name] = date
-
-                    # Queue rollout if enabled and position closed via DTE rule
-                    _rc = rollout_config or {}
-                    if _rc.get("enabled") and exit_reason == "dte":
-                        _min_pnl = float(_rc.get("min_profit_pct", 0)) / 100.0 * abs(position.initial_value)
-                        if net_pnl >= _min_pnl:
-                            _n_roll = position.legs[0].quantity if position.legs else 1
-                            pending_rollouts.append((position.name, getattr(position, "entry_zone", ""), _n_roll))
-                            logger.warning(f"[ROLLOUT QUEUED {date}] {position.name} zone={getattr(position, 'entry_zone', '')} net_pnl={net_pnl:.2f}")
+                if signal.action == "ROLL":
+                    _n_roll = position.legs[0].quantity if position.legs else 1
+                    pending_rollouts.append((position.name, getattr(position, "entry_zone", ""), _n_roll))
+                    logger.warning(f"[ROLLOUT QUEUED {date}] {position.name} zone={getattr(position, 'entry_zone', '')} net_pnl={net_pnl:.2f}")
 
                 if db_position is not None:
                     db_position.status = "CLOSED"
                     db_position.closed_at = date
                     db_position.close_value = position.price
-                    db_position.realized_pnl = position.pnl - _entry_comm - _exit_comm
+                    db_position.realized_pnl = net_pnl
                     db_position.exit_transaction_costs = _exit_comm if _exit_comm > 0 else None
-                    if exit_conditions:
-                        db_position.exit_conditions = exit_conditions
+                    if signal.exit_conditions:
+                        db_position.exit_conditions = signal.exit_conditions
                 db.commit()
 
             portfolio.remove_closed_positions()

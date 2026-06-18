@@ -722,5 +722,77 @@ Add to `parameter_schema.py`:
 
 ---
 
-**Status**: Architecture designed, ready for implementation
-**Next**: Begin with Zone Classifier (L1)
+**Status**: ✅ Implementato — FASE 0-5 complete, 122 test passing
+**Implementato in**: `backend/app/engines/option/`
+
+---
+
+## ExitAgent — Punto 3 (prossima implementazione)
+
+Il Decision Layer copre solo l'entrata. L'uscita è affidata a regole fisse in `runs.py`.
+Il prossimo step è costruire un `ExitAgent` esplicito che gestisce:
+
+### Responsabilità
+- **Trailing stop a livello portfolio** — non solo per singolo trade, ma monitorando l'esposizione aggregata
+- **Rollout** — decide se chiudere vicino a scadenza e riaprire sulla scadenza successiva, o chiudere definitivamente
+
+### Interfaccia
+
+```python
+class ExitAgent:
+    def observe(self, position: BacktestPosition, state: BacktestState) -> ExitFeatures:
+        """Legge: P&L corrente, DTE, Greeks, drawdown portfolio, regime macro"""
+
+    def decide(self, features: ExitFeatures) -> ExitSignal:
+        """
+        Restituisce: HOLD / CLOSE / ROLL
+        Oggi: rule-based (soglie su P&L, DTE, delta breach)
+        Futuro: ML classifier (input=ExitFeatures, output=ExitSignal, reward=P&L finale)
+        """
+
+    def act(self, signal: ExitSignal, portfolio: Portfolio) -> None:
+        """Esegue chiusura o rollout tramite PortfolioAgent"""
+```
+
+### ExitFeatures (stato osservabile)
+```python
+@dataclass
+class ExitFeatures:
+    # Posizione
+    pnl_pct: float           # P&L corrente come % del max profit
+    dte: int                 # Giorni a scadenza
+    delta: float             # Delta corrente
+    theta: float             # Theta corrente
+    # Portfolio
+    portfolio_dd: float      # Drawdown corrente del portfolio
+    open_positions: int      # Numero posizioni aperte
+    # Regime
+    iv_rank: float
+    macro_regime: str
+    zone: str
+```
+
+### Percorso ML
+L'`ExitAgent` è il primo componente ML naturale del sistema perché:
+- Reward chiaro e immediato: P&L finale del trade al close
+- Stato osservabile e compatto: ExitFeatures (< 20 variabili)
+- Dati di training già disponibili: storico posizioni nel DB
+
+Progressione: rule-based → XGBoost/RandomForest classifier → RL policy (PPO/SAC)
+
+---
+
+## Implementation Roadmap
+
+### Completato ✅
+- L1: Zone Classifier
+- L2: Strategy Selector
+- L3: Pricing & Greeks
+- L4: Opportunity Evaluator
+- L5: Trade Decision
+- Integration + 122 tests
+
+### Prossimo
+- ExitAgent: trailing stop portfolio-level + rollout logic
+- Interfacce `PipelineStage`, `Agent`, `LayerContext`
+- Wrap del codice esistente nelle nuove interfacce (senza cambiare comportamento)

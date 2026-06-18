@@ -383,6 +383,18 @@ const PARAMETER_HINTS: Record<string, { label: string; description: string }> =
 				"Only roll positions that closed with a profit >= X% of initial credit. 0 = always roll.",
 		},
 
+		// Portfolio Trailing Stop
+		"exit.portfolio_trailing_stop.enabled": {
+			label: "Enable Portfolio Trailing Stop",
+			description:
+				"Close all open positions if portfolio equity drops more than X% below its peak. Operates at portfolio level, independently of per-position rules.",
+		},
+		"exit.portfolio_trailing_stop.pullback_pct": {
+			label: "Portfolio Pullback %",
+			description:
+				"Maximum allowed drawdown from peak equity before all positions are closed. E.g. 20 = close everything if equity falls 20% below the high-water mark.",
+		},
+
 		// Cost Model (IBKR commissions)
 		"cost_model.commission_per_contract": {
 			label: "Commission per Contract",
@@ -534,6 +546,11 @@ const SIZING_PARAMS = [
 ];
 
 const ROLLOUT_PARAMS = ["rollout.enabled", "rollout.min_profit_pct"];
+
+const PORTFOLIO_TRAILING_STOP_PARAMS = [
+	"exit.portfolio_trailing_stop.enabled",
+	"exit.portfolio_trailing_stop.pullback_pct",
+];
 
 // Profit target, stop loss e DTE exit sono ora configurati per-strategia nel tab Strategie.
 const EXIT_PARAMS = [
@@ -1154,6 +1171,16 @@ export default function ParameterEditor({
 									</Divider>
 									<div className="grid grid-cols-2 gap-2">
 										{ROLLOUT_PARAMS.map(renderField)}
+									</div>
+									<Divider
+										orientation="left"
+										orientationMargin={0}
+										style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 8 }}
+									>
+										Portfolio Trailing Stop
+									</Divider>
+									<div className="grid grid-cols-2 gap-2">
+										{PORTFOLIO_TRAILING_STOP_PARAMS.map(renderField)}
 									</div>
 								</div>
 							),

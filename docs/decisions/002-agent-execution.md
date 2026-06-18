@@ -51,6 +51,20 @@ Qualsiasi azione fuori da questo set richiede intervento esplicito dell'utente.
 - **Sistema rule-based classico (if/then hardcoded)**: meno flessibile, difficile da configurare senza modificare il codice
 - **Agente con piena autonomia decisionale**: rischio operativo troppo elevato, non adatto a questo contesto
 
+## Relazione con l'architettura evolutiva (aggiornamento 2026-06)
+
+La struttura formale dell'agente è ora definita in `docs/architecture.md` tramite il protocollo `Agent`:
+
+```python
+class Agent(Protocol):
+    def observe(self, state: BacktestState) -> dict: ...
+    def decide(self, features: dict) -> Signal: ...
+```
+
+L'agente di esecuzione descritto in questo ADR corrisponde alla combinazione
+`PortfolioAgent` (coordinatore, gestisce limiti e capitale) + `StrategyAgent` (decisione locale).
+Il `PortfolioAgent` è il punto di integrazione con l'API del broker.
+
 ## Decisioni aperte
 - [ ] Quale broker e quale API (probabile IBKR, da confermare)
 - [ ] Gestione errori e fallback se l'API del broker non risponde
